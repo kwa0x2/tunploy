@@ -65,12 +65,14 @@ func run() error {
 	}
 	go purgeExpiredSessions(ctx, st)
 
+	handler := server.New(cfg, st, dk, mgr)
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           server.New(cfg, st, dk, mgr),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+	srv.RegisterOnShutdown(handler.Close)
 
 	errCh := make(chan error, 1)
 	go func() {

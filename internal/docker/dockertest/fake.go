@@ -5,8 +5,10 @@ package dockertest
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +31,8 @@ type Fake struct {
 	StartErr error
 	// ExecOutput answers Exec; by default it returns an empty `wg show dump`.
 	ExecOutput func(name string, cmd []string) ([]byte, error)
+	// LogOutput is what Logs returns for every container.
+	LogOutput string
 }
 
 func New() *Fake {
@@ -181,6 +185,15 @@ func (f *Fake) Exec(ctx context.Context, id string, cmd []string) ([]byte, error
 		return []byte("priv\tpub\t51820\toff\n"), nil
 	}
 	return nil, nil
+}
+
+func (f *Fake) Logs(ctx context.Context, id string, tail int, follow bool) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, err := f.find(id); err != nil {
+		return nil, err
+	}
+	return io.NopCloser(strings.NewReader(f.LogOutput)), nil
 }
 
 // Container returns a copy of the named container, if it exists.

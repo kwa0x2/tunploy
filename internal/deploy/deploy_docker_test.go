@@ -3,9 +3,11 @@ package deploy
 import (
 	"context"
 	"errors"
+	"io"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,8 +92,24 @@ func TestDeployAgainstDocker(t *testing.T) {
 		t.Fatalf("disabled peer still on the interface: %v", stats)
 	}
 
+	live, err := m.Logs(ctx, created.ID, 50, true)
+	if err != nil {
+		t.Fatalf("follow logs: %v", err)
+	}
+	defer live.Close()
+
 	if err := m.Stop(ctx, created.ID); err != nil {
 		t.Fatalf("stop: %v", err)
+	}
+	// A followed stream has to end on its own once the container stops.
+	out, err := io.ReadAll(live)
+	if err != nil {
+		t.Fatalf("read followed logs: %v", err)
+	}
+	first, _, _ := strings.Cut(string(out), "\n")
+	stamp, text, _ := strings.Cut(first, " ")
+	if _, err := time.Parse(time.RFC3339Nano, stamp); err != nil || !strings.Contains(string(out), "wireguard wg0 is up") {
+		t.Fatalf("want timestamped lines including the startup message, got %q (%q)", out, text)
 	}
 	if s := m.Status(ctx, created.ID); s.State != StateStopped || s.Error != "" {
 		t.Fatalf("after a clean stop want stopped without error, got %+v", s)

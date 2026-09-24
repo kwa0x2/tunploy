@@ -88,6 +88,19 @@ export interface DockerStatus {
 
 export type PeerInput = { name?: string; enabled?: boolean }
 
+export interface Settings {
+  public_host: string
+  default_dns: string[]
+  public_host_env: string
+}
+
+export type SettingsInput = Partial<Pick<Settings, "public_host" | "default_dns">>
+
+export interface PasswordChange {
+  current_password: string
+  new_password: string
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
@@ -144,20 +157,40 @@ const peerPath = (instanceId: number, peerId: number) =>
 export const peerConfigUrl = (instanceId: number, peerId: number) =>
   `${peerPath(instanceId, peerId)}/config`
 
-async function fetchText(path: string): Promise<string> {
+async function fetchRaw(path: string, signal?: AbortSignal): Promise<Response> {
   let res: Response
   try {
-    res = await fetch(path, { credentials: "same-origin" })
-  } catch {
+    res = await fetch(path, { credentials: "same-origin", signal })
+  } catch (err) {
+    if (signal?.aborted) throw err
     throw new ApiError(0, { code: "network_error", message: "Cannot reach the server." })
   }
   if (!res.ok) {
-    throw new ApiError(res.status, {
-      code: "unknown_error",
-      message: `Request failed with status ${res.status}`,
-    })
+    const body = await res
+      .json()
+      .then((p: { error?: ApiErrorBody }) => p.error)
+      .catch(() => undefined)
+    throw new ApiError(
+      res.status,
+      body ?? { code: "unknown_error", message: `Request failed with status ${res.status}` },
+    )
   }
-  return res.text()
+  return res
+}
+
+const fetchText = async (path: string) => (await fetchRaw(path)).text()
+
+// streamText calls onChunk with decoded text until the server closes the
+// stream or signal aborts.
+async function streamText(path: string, onChunk: (text: string) => void, signal: AbortSignal) {
+  const res = await fetchRaw(path, signal)
+  if (!res.body) return
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return
+    onChunk(value)
+  }
 }
 
 export const api = {
@@ -166,6 +199,10 @@ export const api = {
   login: (creds: Credentials) => post<User>("/api/auth/login", creds),
   logout: () => post<void>("/api/auth/logout"),
   me: () => request<User>("/api/auth/me"),
+  changePassword: (change: PasswordChange) => post<void>("/api/auth/password", change),
+
+  settings: () => request<Settings>("/api/settings"),
+  updateSettings: (input: SettingsInput) => patch<Settings>("/api/settings", input),
 
   dockerStatus: () => request<DockerStatus>("/api/system/docker"),
 
@@ -177,6 +214,17 @@ export const api = {
   deleteInstance: (id: number) => del(instancePath(id)),
   instanceAction: (id: number, action: "start" | "stop" | "restart") =>
     post<Instance>(`${instancePath(id)}/${action}`),
+  instanceLogs: (
+    id: number,
+    opts: { tail: number; follow: boolean },
+    onChunk: (text: string) => void,
+    signal: AbortSignal,
+  ) =>
+    streamText(
+      `${instancePath(id)}/logs?tail=${opts.tail}&follow=${opts.follow ? 1 : 0}`,
+      onChunk,
+      signal,
+    ),
 
   peers: (instanceId: number) => request<Peer[]>(`${instancePath(instanceId)}/peers`),
   createPeer: (instanceId: number, input: PeerInput) =>

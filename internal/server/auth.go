@@ -144,6 +144,64 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) error {
 	return httpx.JSON(w, http.StatusOK, newUserResponse(user))
 }
 
+type passwordChange struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// handleChangePassword signs out every other session and hands this one a
+// fresh token, so a stolen cookie dies with the old password.
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) error {
+	id, ok := auth.IdentityFrom(r.Context())
+	if !ok {
+		return httpx.Unauthorized("not signed in")
+	}
+	var req passwordChange
+	if err := httpx.Decode(r, &req); err != nil {
+		return err
+	}
+	if msg := checkPassword(req.NewPassword); msg != "" {
+		return httpx.Invalid(map[string]string{"new_password": msg})
+	}
+
+	// Shares the login budget: a hijacked session must not become an
+	// unthrottled way to guess the password.
+	key := id.Email + "|" + clientIP(r)
+	if ok, retryIn := s.loginThrottle.Allowed(key); !ok {
+		w.Header().Set("Retry-After", retryAfterSeconds(retryIn))
+		return httpx.Errorf(http.StatusTooManyRequests, "too_many_attempts",
+			"too many failed attempts, try again in %s", retryIn.Round(time.Second))
+	}
+
+	user, err := s.store.UserByID(r.Context(), id.UserID)
+	if err != nil {
+		return err
+	}
+	if err := auth.VerifyPassword(user.PasswordHash, req.CurrentPassword); err != nil {
+		if errors.Is(err, auth.ErrPasswordMismatch) {
+			s.loginThrottle.Fail(key)
+			return httpx.Invalid(map[string]string{"current_password": "current password is incorrect"})
+		}
+		return err
+	}
+	s.loginThrottle.Reset(key)
+
+	hash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		return err
+	}
+	if err := s.store.UpdateUserPassword(r.Context(), user.ID, hash); err != nil {
+		return err
+	}
+	if err := s.store.DeleteUserSessions(r.Context(), user.ID); err != nil {
+		return err
+	}
+	if err := s.startSession(w, r, user); err != nil {
+		return err
+	}
+	return httpx.NoContent(w)
+}
+
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *store.User) error {
 	token, hash, err := auth.NewSessionToken()
 	if err != nil {
@@ -238,16 +296,22 @@ func validateCredentialFields(c credentials) map[string]string {
 		fields["email"] = "email is not a valid address"
 	}
 
-	switch {
-	case c.Password == "":
-		fields["password"] = "password is required"
-	case len(c.Password) < minPasswordLength:
-		fields["password"] = "password must be at least 8 characters"
-	case len(c.Password) > maxPasswordLength:
-		fields["password"] = "password must be at most 256 characters"
+	if msg := checkPassword(c.Password); msg != "" {
+		fields["password"] = msg
 	}
-
 	return fields
+}
+
+func checkPassword(p string) string {
+	switch {
+	case p == "":
+		return "password is required"
+	case len(p) < minPasswordLength:
+		return "password must be at least 8 characters"
+	case len(p) > maxPasswordLength:
+		return "password must be at most 256 characters"
+	}
+	return ""
 }
 
 func clientIP(r *http.Request) string {

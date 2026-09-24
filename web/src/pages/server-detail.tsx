@@ -11,6 +11,7 @@ import {
   Plus,
   QrCode,
   RotateCw,
+  ScrollText,
   Settings2,
   Square,
   Trash2,
@@ -39,6 +40,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { CopyButton } from "@/components/copy-button"
 import { InstanceFormDialog } from "@/components/instance-form-dialog"
+import { LogsDialog } from "@/components/logs-dialog"
 import { PageHeader } from "@/components/page-header"
 import { PeerConfigDialog, PeerNameDialog } from "@/components/peer-dialogs"
 import { InstanceStatus, PeerStatus, PeerTraffic } from "@/components/status"
@@ -88,6 +90,7 @@ function ServerDetail({ id }: { id: number }) {
   const [pending, setPending] = useState<Action | null>(null)
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [viewingLogs, setViewingLogs] = useState(false)
 
   if (instance.error instanceof ApiError && instance.error.status === 404) return <ServerMissing />
 
@@ -163,6 +166,10 @@ function ServerDetail({ id }: { id: number }) {
                 <MoreHorizontal />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem onClick={() => setViewingLogs(true)}>
+                  <ScrollText />
+                  View logs
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEditing(true)}>
                   <Settings2 />
                   Settings
@@ -181,7 +188,20 @@ function ServerDetail({ id }: { id: number }) {
       {current.status.error && (
         <Alert variant="destructive" className="mb-6">
           <AlertTitle>The tunnel is not healthy</AlertTitle>
-          <AlertDescription>{current.status.error}</AlertDescription>
+          <AlertDescription>
+            <p>{current.status.error}</p>
+            {state !== "unknown" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => setViewingLogs(true)}
+              >
+                <ScrollText />
+                View logs
+              </Button>
+            )}
+          </AlertDescription>
         </Alert>
       )}
 
@@ -189,6 +209,13 @@ function ServerDetail({ id }: { id: number }) {
         <PeersCard instance={current} peers={peers.data} error={peers.error} reload={peers.reload} />
         <ConnectionCard instance={current} />
       </div>
+
+      <LogsDialog
+        instanceId={id}
+        name={current.name}
+        open={viewingLogs}
+        onOpenChange={setViewingLogs}
+      />
 
       <InstanceFormDialog
         mode="edit"

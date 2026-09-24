@@ -38,8 +38,10 @@ func (in Instance) Validate() map[string]string {
 		fields["listen_port"] = "listen port must be between 1 and 65535"
 	}
 
-	if msg := checkHost(in.Endpoint); msg != "" {
-		fields["endpoint"] = msg
+	if in.Endpoint == "" {
+		fields["endpoint"] = "endpoint is required"
+	} else if !ValidHost(in.Endpoint) {
+		fields["endpoint"] = "endpoint must be a hostname or IP address, without a port"
 	}
 
 	for _, a := range in.DNS {
@@ -92,22 +94,20 @@ func checkName(name string) string {
 	return ""
 }
 
-func checkHost(host string) string {
-	if host == "" {
-		return "endpoint is required"
-	}
+// ValidHost accepts an IP address or a DNS name, but not a port.
+func ValidHost(host string) bool {
 	if _, err := netip.ParseAddr(host); err == nil {
-		return ""
+		return true
 	}
-	if len(host) > 253 {
-		return "endpoint is too long"
+	if host == "" || len(host) > 253 {
+		return false
 	}
 	for _, label := range strings.Split(host, ".") {
 		if !validLabel(label) {
-			return "endpoint must be a hostname or IP address, without a port"
+			return false
 		}
 	}
-	return ""
+	return true
 }
 
 func validLabel(label string) bool {

@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -25,6 +26,10 @@ type Server struct {
 	deploy        *deploy.Manager
 	loginThrottle *auth.Throttle
 	handler       http.Handler
+
+	// closing ends long-lived streams when the panel shuts down.
+	closing     context.Context
+	stopStreams context.CancelFunc
 }
 
 func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager) *Server {
@@ -35,9 +40,13 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager) *Se
 		deploy:        mgr,
 		loginThrottle: auth.NewThrottle(loginMaxAttempts, loginWindow),
 	}
+	s.closing, s.stopStreams = context.WithCancel(context.Background())
 	s.handler = chain(s.routes(), recoverPanics, logRequests)
 	return s
 }
+
+// Close ends open log streams; register it with http.Server.RegisterOnShutdown.
+func (s *Server) Close() { s.stopStreams() }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
@@ -54,7 +63,10 @@ func (s *Server) routes() http.Handler {
 	private := http.NewServeMux()
 	private.Handle("POST /api/auth/logout", httpx.Handler(s.handleLogout))
 	private.Handle("GET /api/auth/me", httpx.Handler(s.handleMe))
+	private.Handle("POST /api/auth/password", httpx.Handler(s.handleChangePassword))
 	private.Handle("GET /api/system/docker", httpx.Handler(s.handleDockerStatus))
+	private.Handle("GET /api/settings", httpx.Handler(s.handleGetSettings))
+	private.Handle("PATCH /api/settings", httpx.Handler(s.handleUpdateSettings))
 
 	private.Handle("GET /api/instances", httpx.Handler(s.handleListInstances))
 	private.Handle("POST /api/instances", httpx.Handler(s.handleCreateInstance))
@@ -65,6 +77,7 @@ func (s *Server) routes() http.Handler {
 	private.Handle("POST /api/instances/{id}/start", s.handleInstanceAction((*deploy.Manager).Start))
 	private.Handle("POST /api/instances/{id}/stop", s.handleInstanceAction((*deploy.Manager).Stop))
 	private.Handle("POST /api/instances/{id}/restart", s.handleInstanceAction((*deploy.Manager).Restart))
+	private.Handle("GET /api/instances/{id}/logs", httpx.Handler(s.handleInstanceLogs))
 
 	private.Handle("GET /api/instances/{id}/peers", httpx.Handler(s.handleListPeers))
 	private.Handle("POST /api/instances/{id}/peers", httpx.Handler(s.handleCreatePeer))

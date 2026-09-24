@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -80,7 +81,10 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 
-	in := s.defaultInstance(existing)
+	in, err := s.defaultInstance(r.Context(), existing)
+	if err != nil {
+		return err
+	}
 	fields := req.apply(&in)
 	if req.Address != nil {
 		if other := overlapping(existing, in.Address); other != nil {
@@ -109,7 +113,10 @@ func (s *Server) handleInstanceDefaults(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return err
 	}
-	in := s.defaultInstance(existing)
+	in, err := s.defaultInstance(r.Context(), existing)
+	if err != nil {
+		return err
+	}
 	return httpx.JSON(w, http.StatusOK, instanceDefaults{
 		Address:             in.Address,
 		ListenPort:          in.ListenPort,
@@ -131,11 +138,16 @@ type instanceDefaults struct {
 	ClientAllowedIPs    []netip.Prefix `json:"client_allowed_ips"`
 }
 
-func (s *Server) defaultInstance(existing []wg.Instance) wg.Instance {
-	in := wg.NewInstance("", s.cfg.PublicHost)
+func (s *Server) defaultInstance(ctx context.Context, existing []wg.Instance) (wg.Instance, error) {
+	settings, err := s.settings(ctx)
+	if err != nil {
+		return wg.Instance{}, err
+	}
+	in := wg.NewInstance("", settings.publicHost(s.cfg.PublicHost))
 	in.Address = nextFreeSubnet(existing)
 	in.ListenPort = nextFreePort(existing)
-	return in
+	in.DNS = slices.Clone(settings.DefaultDNS)
+	return in, nil
 }
 
 func (s *Server) rollbackInstance(ctx context.Context, id int64) {

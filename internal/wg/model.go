@@ -2,6 +2,7 @@ package wg
 
 import (
 	"net/netip"
+	"slices"
 	"time"
 )
 
@@ -11,7 +12,10 @@ const (
 	DefaultMTU        = 1420
 )
 
-var DefaultAddress = netip.MustParsePrefix("10.8.0.1/24")
+var (
+	DefaultAddress = netip.MustParsePrefix("10.8.0.1/24")
+	DefaultDNS     = []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("1.0.0.1")}
+)
 
 // Instance is one WireGuard interface, run as its own container.
 type Instance struct {
@@ -58,7 +62,7 @@ func NewInstance(name, endpoint string) Instance {
 		PrivateKey:          priv,
 		PublicKey:           priv.PublicKey(),
 		Endpoint:            endpoint,
-		DNS:                 []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("1.0.0.1")},
+		DNS:                 slices.Clone(DefaultDNS),
 		PersistentKeepalive: DefaultKeepalive,
 		ClientAllowedIPs:    []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")},
 	}

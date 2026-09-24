@@ -1,0 +1,234 @@
+import { useCallback, useState } from "react"
+import type { FormEvent } from "react"
+import { Loader2 } from "lucide-react"
+import { toast } from "sonner"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
+import { FormField } from "@/components/form-field"
+import { PageHeader } from "@/components/page-header"
+import { useResource } from "@/hooks/use-resource"
+import { ApiError, api } from "@/lib/api"
+import type { Settings } from "@/lib/api"
+import { useAuth } from "@/lib/auth"
+import { errorMessage } from "@/lib/format"
+
+export function SettingsPage() {
+  const settings = useResource(useCallback(() => api.settings(), []))
+
+  return (
+    <>
+      <PageHeader title="Settings" description="Panel defaults and your account." />
+      <div className="grid max-w-2xl gap-6">
+        {settings.data ? (
+          <DefaultsCard settings={settings.data} onSaved={() => void settings.reload()} />
+        ) : settings.error !== undefined ? (
+          <Alert variant="destructive">
+            <AlertDescription>{errorMessage(settings.error)}</AlertDescription>
+          </Alert>
+        ) : (
+          <Skeleton className="h-72 rounded-xl" />
+        )}
+        <AccountCard />
+      </div>
+    </>
+  )
+}
+
+const splitList = (raw: string) => raw.split(/[\s,]+/).filter(Boolean)
+
+function DefaultsCard({ settings, onSaved }: { settings: Settings; onSaved: () => void }) {
+  const [publicHost, setPublicHost] = useState(settings.public_host)
+  const [dns, setDns] = useState(settings.default_dns.join(", "))
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    setFieldErrors({})
+    setBusy(true)
+    try {
+      const saved = await api.updateSettings({
+        public_host: publicHost.trim(),
+        default_dns: splitList(dns),
+      })
+      setPublicHost(saved.public_host)
+      setDns(saved.default_dns.join(", "))
+      toast.success("Settings saved.")
+      onSaved()
+    } catch (err) {
+      if (err instanceof ApiError && Object.keys(err.fields).length > 0) setFieldErrors(err.fields)
+      else toast.error(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const env = settings.public_host_env
+
+  return (
+    <Card>
+      <form onSubmit={handleSubmit} noValidate className="contents">
+        <CardHeader>
+          <CardTitle>New server defaults</CardTitle>
+          <CardDescription>
+            Applied when you create a server. Existing servers keep their own values; change
+            those in each server's settings.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <FormField
+            id="public_host"
+            label="Public host"
+            error={fieldErrors.public_host}
+            hint={
+              env
+                ? `The hostname or IP devices dial. Leave empty to use TUNPLOY_PUBLIC_HOST (${env}).`
+                : "The hostname or IP devices dial. Leave empty to fill it from the address you open the panel with."
+            }
+          >
+            <Input
+              id="public_host"
+              placeholder={env || "vpn.example.com"}
+              value={publicHost}
+              onChange={(e) => setPublicHost(e.target.value)}
+              aria-invalid={Boolean(fieldErrors.public_host)}
+            />
+          </FormField>
+          <FormField
+            id="default_dns"
+            label="DNS servers"
+            error={fieldErrors.default_dns}
+            hint="Comma separated. Leave empty to let devices keep their own resolver."
+          >
+            <Input
+              id="default_dns"
+              placeholder="1.1.1.1, 1.0.0.1"
+              value={dns}
+              onChange={(e) => setDns(e.target.value)}
+              aria-invalid={Boolean(fieldErrors.default_dns)}
+            />
+          </FormField>
+        </CardContent>
+        <CardFooter className="justify-end">
+          <Button type="submit" disabled={busy}>
+            {busy && <Loader2 className="animate-spin" />}
+            Save
+          </Button>
+        </CardFooter>
+      </form>
+    </Card>
+  )
+}
+
+const emptyPasswords = { current_password: "", new_password: "", confirmation: "" }
+
+function AccountCard() {
+  const { user } = useAuth()
+  const [values, setValues] = useState(emptyPasswords)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [formError, setFormError] = useState("")
+  const [busy, setBusy] = useState(false)
+
+  const set = (key: keyof typeof emptyPasswords) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setValues((v) => ({ ...v, [key]: e.target.value }))
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    setFieldErrors({})
+    setFormError("")
+    if (values.new_password !== values.confirmation) {
+      setFieldErrors({ confirmation: "Passwords do not match" })
+      return
+    }
+
+    setBusy(true)
+    try {
+      await api.changePassword({
+        current_password: values.current_password,
+        new_password: values.new_password,
+      })
+      setValues(emptyPasswords)
+      toast.success("Password changed. Other devices have been signed out.")
+    } catch (err) {
+      if (err instanceof ApiError && Object.keys(err.fields).length > 0) setFieldErrors(err.fields)
+      else setFormError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card>
+      <form onSubmit={handleSubmit} noValidate className="contents">
+        <CardHeader>
+          <CardTitle>Account</CardTitle>
+          <CardDescription>
+            Signed in as {user?.name} ({user?.email}).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {formError && (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
+          {/* Lets password managers tie the new password to the account. */}
+          <input type="email" autoComplete="username" value={user?.email ?? ""} readOnly hidden />
+          <FormField id="current_password" label="Current password" error={fieldErrors.current_password}>
+            <Input
+              id="current_password"
+              type="password"
+              autoComplete="current-password"
+              value={values.current_password}
+              onChange={set("current_password")}
+              aria-invalid={Boolean(fieldErrors.current_password)}
+            />
+          </FormField>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField
+              id="new_password"
+              label="New password"
+              error={fieldErrors.new_password}
+              hint="At least 8 characters."
+            >
+              <Input
+                id="new_password"
+                type="password"
+                autoComplete="new-password"
+                value={values.new_password}
+                onChange={set("new_password")}
+                aria-invalid={Boolean(fieldErrors.new_password)}
+              />
+            </FormField>
+            <FormField id="confirmation" label="Confirm new password" error={fieldErrors.confirmation}>
+              <Input
+                id="confirmation"
+                type="password"
+                autoComplete="new-password"
+                value={values.confirmation}
+                onChange={set("confirmation")}
+                aria-invalid={Boolean(fieldErrors.confirmation)}
+              />
+            </FormField>
+          </div>
+        </CardContent>
+        <CardFooter className="justify-end">
+          <Button type="submit" disabled={busy || !values.current_password || !values.new_password}>
+            {busy && <Loader2 className="animate-spin" />}
+            Change password
+          </Button>
+        </CardFooter>
+      </form>
+    </Card>
+  )
+}

@@ -6,9 +6,9 @@ import { LoginPage } from "@/pages/login"
 import { NotFoundPage } from "@/pages/not-found"
 import { OverviewPage } from "@/pages/overview"
 import { PeersPage } from "@/pages/peers"
-import { PlaceholderPage } from "@/pages/placeholder"
 import { ServerDetailPage } from "@/pages/server-detail"
 import { ServersPage } from "@/pages/servers"
+import { SettingsPage } from "@/pages/settings"
 import { SetupPage } from "@/pages/setup"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { ThemeProvider } from "@/lib/theme"
@@ -49,10 +49,7 @@ function Routing() {
         <Route path="/servers" element={<ServersPage />} />
         <Route path="/servers/:id" element={<ServerDetailPage />} />
         <Route path="/peers" element={<PeersPage />} />
-        <Route
-          path="/settings"
-          element={<PlaceholderPage title="Settings" description="Panel and node configuration." />}
-        />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/setup" element={<Navigate to="/" replace />} />

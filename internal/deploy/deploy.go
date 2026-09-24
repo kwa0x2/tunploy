@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ type Docker interface {
 	StopContainer(ctx context.Context, id string, timeout time.Duration) error
 	RemoveContainer(ctx context.Context, id string) error
 	Exec(ctx context.Context, id string, cmd []string) ([]byte, error)
+	Logs(ctx context.Context, id string, tail int, follow bool) (io.ReadCloser, error)
 }
 
 type Manager struct {
@@ -278,6 +280,21 @@ func (m *Manager) PeerStats(ctx context.Context, instanceID int64) (map[wg.Key]w
 		return nil, err
 	}
 	return wg.ParseDump(out)
+}
+
+// ErrNotDeployed means the instance has no container to act on.
+var ErrNotDeployed = errors.New("instance has no container")
+
+// Logs works on stopped containers too: why it stopped is usually the point.
+func (m *Manager) Logs(ctx context.Context, instanceID int64, tail int, follow bool) (io.ReadCloser, error) {
+	ct, err := m.container(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if ct == nil {
+		return nil, ErrNotDeployed
+	}
+	return m.docker.Logs(ctx, ct.Name, tail, follow)
 }
 
 // container returns nil, nil when the instance has no container.
