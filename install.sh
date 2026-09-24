@@ -148,10 +148,14 @@ ensure_admin() {
 	tries=0
 	while [ "$tries" -lt 3 ]; do
 		tries=$((tries + 1))
-		name=$(ask "  Name: ")
-		email=$(ask "  Email: ")
-		password=$(ask_secret "  Password (at least 8 characters): ")
-		if [ "$password" != "$(ask_secret "  Repeat password: ")" ]; then
+		ask "  Name: "
+		name=$answer
+		ask "  Email: "
+		email=$answer
+		ask_secret "  Password (at least 8 characters): "
+		password=$answer
+		ask_secret "  Repeat password: "
+		if [ "$password" != "$answer" ]; then
 			warn "the passwords do not match, try again"
 		elif create_admin "$name" "$email" "$password"; then
 			ADMIN=$email
@@ -166,13 +170,14 @@ create_admin() {
 	printf '%s\n' "$3" | docker exec -i "$CONTAINER" tunploy admin create --name "$1" --email "$2"
 }
 
+# Both leave the reply in $answer: under sudo-rs, reading /dev/tty inside
+# $(...) hangs after the first prompt.
 ask() {
 	answer=
 	while [ -z "$answer" ]; do
 		printf '%s' "$1" >/dev/tty
 		IFS= read -r answer </dev/tty || fail "no answer"
 	done
-	printf '%s' "$answer"
 }
 
 ask_secret() {
@@ -181,7 +186,6 @@ ask_secret() {
 	IFS= read -r answer </dev/tty || answer=
 	stty echo </dev/tty
 	printf '\n' >/dev/tty
-	printf '%s' "$answer"
 }
 
 print_summary() {
