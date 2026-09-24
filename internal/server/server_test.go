@@ -18,6 +18,11 @@ import (
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
+	return newTestServerWithDocker(t, fakeDocker{})
+}
+
+func newTestServerWithDocker(t *testing.T, dk Docker) *Server {
+	t.Helper()
 
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -25,7 +30,7 @@ func newTestServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	return New(config.Config{SessionTTL: time.Hour}, st)
+	return New(config.Config{SessionTTL: time.Hour}, st, dk)
 }
 
 func do(t *testing.T, s *Server, method, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -138,6 +143,7 @@ func TestProtectedRoutesRejectAnonymous(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{"GET", "/api/auth/me"},
 		{"POST", "/api/auth/logout"},
+		{"GET", "/api/system/docker"},
 		{"GET", "/api/something-unknown"},
 	} {
 		rec := do(t, s, tc.method, tc.path, nil)

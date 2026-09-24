@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/config"
+	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
@@ -44,14 +45,21 @@ func run() error {
 	}
 	defer st.Close()
 
+	dk, err := docker.New(cfg.DockerHost)
+	if err != nil {
+		return err
+	}
+	defer dk.Close()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	logDockerStatus(ctx, dk)
 	go purgeExpiredSessions(ctx, st)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           server.New(cfg, st),
+		Handler:           server.New(cfg, st, dk),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
@@ -78,6 +86,20 @@ func run() error {
 	}
 	slog.Info("tunploy stopped cleanly")
 	return nil
+}
+
+// A missing daemon is not fatal: the panel still has to come up so the
+// admin can see what is wrong and fix it from there.
+func logDockerStatus(ctx context.Context, dk *docker.Client) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	info, err := dk.Ping(ctx)
+	if err != nil {
+		slog.Warn("docker is not reachable; VPN services cannot be deployed", "error", err)
+		return
+	}
+	slog.Info("connected to docker", "version", info.Version, "api_version", info.APIVersion)
 }
 
 func purgeExpiredSessions(ctx context.Context, st *store.Store) {

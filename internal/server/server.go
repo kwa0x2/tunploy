@@ -20,14 +20,16 @@ const (
 type Server struct {
 	cfg           config.Config
 	store         *store.Store
+	docker        Docker
 	loginThrottle *auth.Throttle
 	handler       http.Handler
 }
 
-func New(cfg config.Config, st *store.Store) *Server {
+func New(cfg config.Config, st *store.Store, dk Docker) *Server {
 	s := &Server{
 		cfg:           cfg,
 		store:         st,
+		docker:        dk,
 		loginThrottle: auth.NewThrottle(loginMaxAttempts, loginWindow),
 	}
 	s.handler = chain(s.routes(), recoverPanics, logRequests)
@@ -49,6 +51,7 @@ func (s *Server) routes() http.Handler {
 	private := http.NewServeMux()
 	private.Handle("POST /api/auth/logout", httpx.Handler(s.handleLogout))
 	private.Handle("GET /api/auth/me", httpx.Handler(s.handleMe))
+	private.Handle("GET /api/system/docker", httpx.Handler(s.handleDockerStatus))
 
 	// Also catches unmatched paths and method mismatches, so clients only
 	// ever parse the JSON envelope.
