@@ -8,7 +8,7 @@ export function LoginPage() {
 
   return (
     <AuthLayout>
-      <Card className="shadow-xl shadow-indigo-500/5">
+      <Card className="shadow-xl shadow-amber-500/5">
         <CardHeader>
           <CardTitle className="text-lg">Sign in</CardTitle>
           <CardDescription>Welcome back. Sign in to manage your VPN servers.</CardDescription>

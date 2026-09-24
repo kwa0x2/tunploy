@@ -18,6 +18,18 @@ export class ApiError extends Error {
   }
 }
 
+// DeployError is a create that passed validation but did not come up. log
+// is the container's last output, which is gone once the server rolls back.
+export class DeployError extends ApiError {
+  readonly log: string[]
+
+  constructor(body: ApiErrorBody, log: string[] = []) {
+    super(502, body)
+    this.name = "DeployError"
+    this.log = log
+  }
+}
+
 export interface User {
   id: number
   name: string
@@ -58,11 +70,21 @@ export interface Instance extends InstanceSettings {
 
 export type InstanceInput = Partial<InstanceSettings> & { name?: string }
 
+export type ProvisionStep = "image" | "container" | "interface" | "firewall" | "nat"
+
+interface ProvisionEvent {
+  step?: ProvisionStep
+  instance?: Instance
+  error?: ApiErrorBody
+  log?: string[]
+}
+
 export interface PeerStats {
   endpoint?: string
   latest_handshake?: string
   rx_bytes: number
   tx_bytes: number
+  online: boolean
 }
 
 export interface Peer {
@@ -153,12 +175,12 @@ const peerPath = (instanceId: number, peerId: number) =>
 export const peerConfigUrl = (instanceId: number, peerId: number) =>
   `${peerPath(instanceId, peerId)}/config`
 
-async function fetchRaw(path: string, signal?: AbortSignal): Promise<Response> {
+async function fetchRaw(path: string, init?: RequestInit): Promise<Response> {
   let res: Response
   try {
-    res = await fetch(path, { credentials: "same-origin", signal })
+    res = await fetch(path, { credentials: "same-origin", ...init })
   } catch (err) {
-    if (signal?.aborted) throw err
+    if (init?.signal?.aborted) throw err
     throw new ApiError(0, { code: "network_error", message: "Cannot reach the server." })
   }
   if (!res.ok) {
@@ -177,9 +199,9 @@ async function fetchRaw(path: string, signal?: AbortSignal): Promise<Response> {
 const fetchText = async (path: string) => (await fetchRaw(path)).text()
 
 // streamText calls onChunk with decoded text until the server closes the
-// stream or signal aborts.
-async function streamText(path: string, onChunk: (text: string) => void, signal: AbortSignal) {
-  const res = await fetchRaw(path, signal)
+// stream or the request's signal aborts.
+async function streamText(path: string, onChunk: (text: string) => void, init?: RequestInit) {
+  const res = await fetchRaw(path, init)
   if (!res.body) return
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
   for (;;) {
@@ -187,6 +209,55 @@ async function streamText(path: string, onChunk: (text: string) => void, signal:
     if (done) return
     onChunk(value)
   }
+}
+
+// provisionInstance creates a server, reporting each deploy step as the
+// backend finishes it. Validation errors still arrive as a plain ApiError.
+async function provisionInstance(
+  input: InstanceInput,
+  onStep: (step: ProvisionStep) => void,
+): Promise<Instance> {
+  let created: Instance | undefined
+  let rest = ""
+
+  const handle = (line: string) => {
+    if (!line.trim()) return
+    let event: ProvisionEvent
+    try {
+      event = JSON.parse(line) as ProvisionEvent
+    } catch {
+      throw new ApiError(0, {
+        code: "invalid_response",
+        message: "The server returned a response we could not read.",
+      })
+    }
+    if (event.step) onStep(event.step)
+    if (event.error) throw new DeployError(event.error, event.log)
+    if (event.instance) created = event.instance
+  }
+
+  await streamText(
+    "/api/instances",
+    (chunk) => {
+      const lines = (rest + chunk).split("\n")
+      rest = lines.pop() ?? ""
+      lines.forEach(handle)
+    },
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
+      body: JSON.stringify(input),
+    },
+  )
+  handle(rest)
+
+  if (!created) {
+    throw new ApiError(0, {
+      code: "stream_ended",
+      message: "The connection closed before the deploy finished. Check the server list.",
+    })
+  }
+  return created
 }
 
 export const api = {
@@ -204,7 +275,7 @@ export const api = {
   instances: () => request<Instance[]>("/api/instances"),
   instanceDefaults: () => request<InstanceSettings>("/api/instances/defaults"),
   instance: (id: number) => request<Instance>(instancePath(id)),
-  createInstance: (input: InstanceInput) => post<Instance>("/api/instances", input),
+  provisionInstance,
   updateInstance: (id: number, input: InstanceInput) => patch<Instance>(instancePath(id), input),
   deleteInstance: (id: number) => del(instancePath(id)),
   instanceAction: (id: number, action: "start" | "stop" | "restart") =>
@@ -218,7 +289,7 @@ export const api = {
     streamText(
       `${instancePath(id)}/logs?tail=${opts.tail}&follow=${opts.follow ? 1 : 0}`,
       onChunk,
-      signal,
+      { signal },
     ),
 
   peers: (instanceId: number) => request<Peer[]>(`${instancePath(instanceId)}/peers`),

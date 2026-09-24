@@ -58,7 +58,7 @@ func TestDeployAgainstDocker(t *testing.T) {
 	}
 	waitForState(t, m, created.ID, StateRunning)
 
-	stats, err := m.PeerStats(ctx, created.ID)
+	stats, err := m.PeerStats(ctx, created)
 	if err != nil {
 		t.Fatalf("stats with no peers: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestDeployAgainstDocker(t *testing.T) {
 	if err := m.Apply(ctx, created.ID); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	stats, err = m.PeerStats(ctx, created.ID)
+	stats, err = m.PeerStats(ctx, created)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestDeployAgainstDocker(t *testing.T) {
 	if err := m.Apply(ctx, created.ID); err != nil {
 		t.Fatalf("apply disable: %v", err)
 	}
-	if stats, _ = m.PeerStats(ctx, created.ID); len(stats) != 0 {
+	if stats, _ = m.PeerStats(ctx, created); len(stats) != 0 {
 		t.Fatalf("disabled peer still on the interface: %v", stats)
 	}
 

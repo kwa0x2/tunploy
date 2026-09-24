@@ -21,13 +21,13 @@ const states: Record<InstanceState, { label: string; tone: string; dot: string }
   },
   not_deployed: {
     label: "Not deployed",
-    tone: "bg-amber-500/10 text-amber-700 ring-amber-600/20 dark:text-amber-400 dark:ring-amber-400/25",
-    dot: "bg-amber-500",
+    tone: "bg-orange-500/10 text-orange-700 ring-orange-600/20 dark:text-orange-400 dark:ring-orange-400/25",
+    dot: "bg-orange-500",
   },
   unknown: {
     label: "Unknown",
-    tone: "bg-amber-500/10 text-amber-700 ring-amber-600/20 dark:text-amber-400 dark:ring-amber-400/25",
-    dot: "bg-amber-500",
+    tone: "bg-orange-500/10 text-orange-700 ring-orange-600/20 dark:text-orange-400 dark:ring-orange-400/25",
+    dot: "bg-orange-500",
   },
 }
 

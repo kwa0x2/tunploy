@@ -111,10 +111,10 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		switch {
 		case !exists:
 			slog.Info("deploying missing wireguard container", "instance", in.ID)
-			err = m.deploy(ctx, in.ID, true)
+			err = m.deploy(ctx, in.ID, true, nil)
 		case ct.Image != m.image:
 			slog.Info("moving wireguard container to new image", "instance", in.ID, "image", m.image)
-			err = m.deploy(ctx, in.ID, ct.Running())
+			err = m.deploy(ctx, in.ID, ct.Running(), nil)
 		default:
 			err = m.writeConfig(ctx, in.ID)
 		}

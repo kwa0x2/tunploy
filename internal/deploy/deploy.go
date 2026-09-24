@@ -61,6 +61,8 @@ type Manager struct {
 	// Serialises every change to containers and config files, so two
 	// requests never race to recreate the same container.
 	mu sync.Mutex
+
+	activity activity
 }
 
 func New(st *store.Store, dk Docker, dataDir string) (*Manager, error) {
@@ -78,11 +80,12 @@ func New(st *store.Store, dk Docker, dataDir string) (*Manager, error) {
 	}
 
 	return &Manager{
-		store:   st,
-		docker:  dk,
-		dataDir: dataDir,
-		image:   imageTag(files),
-		files:   files,
+		store:    st,
+		docker:   dk,
+		dataDir:  dataDir,
+		image:    imageTag(files),
+		files:    files,
+		activity: activity{peers: map[int64]map[wg.Key]sample{}},
 	}, nil
 }
 
@@ -119,7 +122,15 @@ func (m *Manager) ConfigDir(instanceID int64) string {
 func (m *Manager) Deploy(ctx context.Context, instanceID int64, start bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.deploy(ctx, instanceID, start)
+	return m.deploy(ctx, instanceID, start, nil)
+}
+
+// Provision deploys and starts a new instance, telling progress about each
+// step until the tunnel is up.
+func (m *Manager) Provision(ctx context.Context, instanceID int64, progress Progress) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deploy(ctx, instanceID, true, progress)
 }
 
 // Redeploy recreates the container and keeps it running or stopped as it
@@ -132,16 +143,19 @@ func (m *Manager) Redeploy(ctx context.Context, instanceID int64) error {
 	if err != nil {
 		return err
 	}
-	return m.deploy(ctx, instanceID, ct == nil || ct.Running())
+	return m.deploy(ctx, instanceID, ct == nil || ct.Running(), nil)
 }
 
-func (m *Manager) deploy(ctx context.Context, instanceID int64, start bool) error {
+// deploy waits for a started container to bring the tunnel up, so a config
+// WireGuard rejects fails here rather than showing up later as a crash.
+func (m *Manager) deploy(ctx context.Context, instanceID int64, start bool, progress Progress) error {
 	if err := m.writeConfig(ctx, instanceID); err != nil {
 		return err
 	}
 	if err := m.ensureImage(ctx); err != nil {
 		return err
 	}
+	progress.report(StepImage)
 
 	in, err := m.store.InstanceByID(ctx, instanceID)
 	if err != nil {
@@ -171,7 +185,11 @@ func (m *Manager) deploy(ctx context.Context, instanceID int64, start bool) erro
 	if !start {
 		return nil
 	}
-	return m.docker.StartContainer(ctx, name)
+	if err := m.docker.StartContainer(ctx, name); err != nil {
+		return err
+	}
+	progress.report(StepContainer)
+	return m.waitReady(ctx, name, progress)
 }
 
 func (m *Manager) ensureImage(ctx context.Context) error {
@@ -192,7 +210,7 @@ func (m *Manager) Start(ctx context.Context, instanceID int64) error {
 		return err
 	}
 	if ct == nil {
-		return m.deploy(ctx, instanceID, true)
+		return m.deploy(ctx, instanceID, true, nil)
 	}
 	if err := m.writeConfig(ctx, instanceID); err != nil {
 		return err
@@ -223,7 +241,7 @@ func (m *Manager) Restart(ctx context.Context, instanceID int64) error {
 		return err
 	}
 	if ct == nil {
-		return m.deploy(ctx, instanceID, true)
+		return m.deploy(ctx, instanceID, true, nil)
 	}
 	if err := m.writeConfig(ctx, instanceID); err != nil {
 		return err
@@ -246,6 +264,7 @@ func (m *Manager) Remove(ctx context.Context, instanceID int64) error {
 	if err := os.RemoveAll(m.ConfigDir(instanceID)); err != nil {
 		return fmt.Errorf("remove config dir: %w", err)
 	}
+	m.activity.forget(instanceID)
 	return nil
 }
 
@@ -267,19 +286,25 @@ func (m *Manager) Apply(ctx context.Context, instanceID int64) error {
 }
 
 // PeerStats is empty, not an error, while the instance is not running.
-func (m *Manager) PeerStats(ctx context.Context, instanceID int64) (map[wg.Key]wg.PeerStats, error) {
-	ct, err := m.container(ctx, instanceID)
+func (m *Manager) PeerStats(ctx context.Context, in *wg.Instance) (map[wg.Key]wg.PeerStats, error) {
+	ct, err := m.container(ctx, in.ID)
 	if err != nil {
 		return nil, err
 	}
 	if ct == nil || !ct.Running() {
+		m.activity.forget(in.ID)
 		return map[wg.Key]wg.PeerStats{}, nil
 	}
 	out, err := m.docker.Exec(ctx, ct.Name, []string{"wg", "show", iface, "dump"})
 	if err != nil {
 		return nil, err
 	}
-	return wg.ParseDump(out)
+	stats, err := wg.ParseDump(out)
+	if err != nil {
+		return nil, err
+	}
+	m.activity.observe(in.ID, stats, in.PersistentKeepalive, time.Now())
+	return stats, nil
 }
 
 // ErrNotDeployed means the instance has no container to act on.

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -100,11 +101,68 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 		return instanceWriteError(err)
 	}
 
-	if err := s.deploy.Deploy(r.Context(), created.ID, true); err != nil {
+	if strings.Contains(r.Header.Get("Accept"), ndjson) {
+		return s.streamProvision(w, r, created)
+	}
+	if err := s.deploy.Provision(r.Context(), created.ID, nil); err != nil {
 		s.rollbackInstance(context.WithoutCancel(r.Context()), created.ID)
 		return deployError(err)
 	}
 	return s.writeInstance(w, r, http.StatusCreated, created)
+}
+
+const ndjson = "application/x-ndjson"
+
+// provisionEvent is one line of a streamed create: each step as it
+// completes, then the instance or the error that stopped it.
+type provisionEvent struct {
+	Step     deploy.Step   `json:"step,omitempty"`
+	Instance *instanceView `json:"instance,omitempty"`
+	Error    *httpx.Error  `json:"error,omitempty"`
+	Log      []string      `json:"log,omitempty"`
+}
+
+// streamProvision is how the panel shows a deploy step by step. Everything
+// that can be rejected up front already has been, so the status is always
+// 200 and the outcome is in the last line.
+func (s *Server) streamProvision(w http.ResponseWriter, r *http.Request, in *wg.Instance) error {
+	h := w.Header()
+	h.Set("Content-Type", ndjson)
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	rc := http.NewResponseController(w)
+	enc := json.NewEncoder(w)
+	send := func(ev provisionEvent) {
+		if err := enc.Encode(ev); err == nil {
+			rc.Flush()
+		}
+	}
+
+	err := s.deploy.Provision(r.Context(), in.ID, func(step deploy.Step) {
+		send(provisionEvent{Step: step})
+	})
+	if err != nil {
+		s.rollbackInstance(context.WithoutCancel(r.Context()), in.ID)
+		ev := provisionEvent{}
+		errors.As(deployError(err), &ev.Error)
+		var boot *deploy.BootError
+		if errors.As(err, &boot) {
+			ev.Log = boot.Log
+		}
+		send(ev)
+		return nil
+	}
+
+	view, err := s.instanceView(r.Context(), in)
+	if err != nil {
+		slog.Error("load created instance", "instance", in.ID, "error", err)
+		send(provisionEvent{Error: httpx.Errorf(http.StatusInternalServerError, "internal_error", "something went wrong")})
+		return nil
+	}
+	send(provisionEvent{Instance: &view})
+	return nil
 }
 
 // handleInstanceDefaults tells the create form what an empty field turns into.
@@ -223,15 +281,23 @@ func (s *Server) handleInstanceAction(action func(*deploy.Manager, context.Conte
 }
 
 func (s *Server) writeInstance(w http.ResponseWriter, r *http.Request, status int, in *wg.Instance) error {
-	peers, err := s.store.Peers(r.Context(), in.ID)
+	view, err := s.instanceView(r.Context(), in)
 	if err != nil {
 		return err
 	}
-	return httpx.JSON(w, status, instanceView{
+	return httpx.JSON(w, status, view)
+}
+
+func (s *Server) instanceView(ctx context.Context, in *wg.Instance) (instanceView, error) {
+	peers, err := s.store.Peers(ctx, in.ID)
+	if err != nil {
+		return instanceView{}, err
+	}
+	return instanceView{
 		Instance:  *in,
-		Status:    s.deploy.Status(r.Context(), in.ID),
+		Status:    s.deploy.Status(ctx, in.ID),
 		PeerCount: len(peers),
-	})
+	}, nil
 }
 
 func (s *Server) instanceFromPath(r *http.Request) (*wg.Instance, error) {

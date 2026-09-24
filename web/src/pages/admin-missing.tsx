@@ -25,7 +25,7 @@ export function AdminMissingPage() {
 
   return (
     <AuthLayout className="max-w-lg">
-      <Card className="shadow-xl shadow-indigo-500/5">
+      <Card className="shadow-xl shadow-amber-500/5">
         <CardHeader>
           <CardTitle className="text-lg">No admin account yet</CardTitle>
           <CardDescription>

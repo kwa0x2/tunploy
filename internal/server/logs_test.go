@@ -8,8 +8,8 @@ import (
 
 func TestInstanceLogs(t *testing.T) {
 	p := newPanel(t)
-	p.fake.LogOutput = "2026-09-24T10:00:00Z wireguard wg0 is up\n"
 	in := p.createInstance(map[string]any{"name": "Home"})
+	p.fake.LogOutput = "2026-09-24T10:00:00Z wireguard wg0 is up\n"
 	path := fmt.Sprintf("/api/instances/%d/logs", in.ID)
 
 	rec := p.do("GET", path+"?tail=50&follow=1", nil)

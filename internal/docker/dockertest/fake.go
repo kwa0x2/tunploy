@@ -31,15 +31,27 @@ type Fake struct {
 	StartErr error
 	// ExecOutput answers Exec; by default it returns an empty `wg show dump`.
 	ExecOutput func(name string, cmd []string) ([]byte, error)
-	// LogOutput is what Logs returns for every container.
+	// LogOutput, when set, is what Logs returns for every container.
 	LogOutput string
+	// BootLog is what a container prints once started; the default is a
+	// clean start of the WireGuard image.
+	BootLog string
+	// BootExitCode, when not zero, makes started containers exit with it.
+	BootExitCode int
+
+	logs map[string]string
 }
+
+// ReadyLog mirrors the markers deploy/image/tunploy-wg.sh prints.
+const ReadyLog = "tunploy:step interface\ntunploy:step firewall\ntunploy:step nat\nwireguard wg0 is up\ntunploy:ready\n"
 
 func New() *Fake {
 	return &Fake{
 		images:     map[string]bool{},
 		containers: map[string]*docker.Container{},
 		specs:      map[string]docker.ContainerSpec{},
+		logs:       map[string]string{},
+		BootLog:    ReadyLog,
 	}
 }
 
@@ -137,6 +149,10 @@ func (f *Fake) StartContainer(ctx context.Context, id string) error {
 		return f.StartErr
 	}
 	ct.State = "running"
+	if f.BootExitCode != 0 {
+		ct.State, ct.ExitCode = "exited", f.BootExitCode
+	}
+	f.logs[ct.Name] += f.BootLog
 	return nil
 }
 
@@ -160,6 +176,7 @@ func (f *Fake) RemoveContainer(ctx context.Context, id string) error {
 	}
 	delete(f.containers, ct.Name)
 	delete(f.specs, ct.Name)
+	delete(f.logs, ct.Name)
 	return nil
 }
 
@@ -190,10 +207,14 @@ func (f *Fake) Exec(ctx context.Context, id string, cmd []string) ([]byte, error
 func (f *Fake) Logs(ctx context.Context, id string, tail int, follow bool) (io.ReadCloser, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, err := f.find(id); err != nil {
+	ct, err := f.find(id)
+	if err != nil {
 		return nil, err
 	}
-	return io.NopCloser(strings.NewReader(f.LogOutput)), nil
+	if f.LogOutput != "" {
+		return io.NopCloser(strings.NewReader(f.LogOutput)), nil
+	}
+	return io.NopCloser(strings.NewReader(f.logs[ct.Name])), nil
 }
 
 // Container returns a copy of the named container, if it exists.

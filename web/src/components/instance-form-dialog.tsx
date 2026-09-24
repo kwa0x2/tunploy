@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import type { FormEvent } from "react"
-import { ChevronDown, Loader2 } from "lucide-react"
+import { ChevronDown, Loader2, RotateCw } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,6 +12,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { DeployProgress } from "@/components/deploy-progress"
+import type { DeployState } from "@/components/deploy-progress"
 import { FormField } from "@/components/form-field"
 import { ApiError, api } from "@/lib/api"
 import type { Instance, InstanceInput, InstanceSettings } from "@/lib/api"
@@ -94,6 +96,8 @@ function InstanceForm(
   const [advanced, setAdvanced] = useState(!isCreate)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState("")
+  const [deploy, setDeploy] = useState<DeployState | null>(null)
+  const [deployPort, setDeployPort] = useState<number>()
 
   useEffect(() => {
     if (!isCreate) return
@@ -145,6 +149,38 @@ function InstanceForm(
     return { input, errors }
   }
 
+  function showFieldErrors(fields: Record<string, string>) {
+    setFieldErrors(fields)
+    const hidden = ["endpoint", "listen_port", "address", "dns"].some((f) => f in fields)
+    if (hidden) setAdvanced(true)
+  }
+
+  async function provision(input: InstanceInput) {
+    setBusy(true)
+    setDeployPort(input.listen_port ?? defaults?.listen_port)
+    setDeploy({ status: "running", done: [] })
+    try {
+      const saved = await api.provisionInstance(input, (step) =>
+        setDeploy((d) => d && { ...d, done: [...d.done, step] }),
+      )
+      setDeploy((d) => ({ status: "ready", done: d?.done ?? [] }))
+      // Long enough to see the last step tick before the page moves on.
+      setTimeout(() => {
+        setBusy(false)
+        onSaved(saved)
+        onOpenChange(false)
+      }, 1200)
+    } catch (err) {
+      setBusy(false)
+      if (err instanceof ApiError && Object.keys(err.fields).length > 0) {
+        setDeploy(null)
+        showFieldErrors(err.fields)
+      } else {
+        setDeploy((d) => ({ status: "failed", done: d?.done ?? [], error: err }))
+      }
+    }
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     setFormError("")
@@ -152,25 +188,43 @@ function InstanceForm(
     setFieldErrors(errors)
     if (Object.keys(errors).length > 0) return
 
+    if (props.mode === "create") {
+      await provision(input)
+      return
+    }
+
     setBusy(true)
     try {
-      const saved =
-        props.mode === "create"
-          ? await api.createInstance(input)
-          : await api.updateInstance(props.instance.id, input)
-      onSaved(saved)
+      onSaved(await api.updateInstance(props.instance.id, input))
       onOpenChange(false)
     } catch (err) {
       if (err instanceof ApiError && Object.keys(err.fields).length > 0) {
-        setFieldErrors(err.fields)
-        const hidden = ["endpoint", "listen_port", "address", "dns"].some((f) => f in err.fields)
-        if (hidden) setAdvanced(true)
+        showFieldErrors(err.fields)
       } else {
         setFormError(err instanceof ApiError ? err.message : "Something went wrong.")
       }
     } finally {
       setBusy(false)
     }
+  }
+
+  if (deploy) {
+    return (
+      <div className="space-y-4">
+        <DeployProgress state={deploy} port={deployPort} />
+        {deploy.status === "failed" && (
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeploy(null)}>
+              Back
+            </Button>
+            <Button onClick={() => void provision(build().input)}>
+              <RotateCw />
+              Try again
+            </Button>
+          </DialogFooter>
+        )}
+      </div>
+    )
   }
 
   const endpointField = (
@@ -311,19 +365,13 @@ function InstanceForm(
         </div>
       )}
 
-      {isCreate && busy && (
-        <p className="text-muted-foreground text-xs">
-          The first deploy builds the WireGuard image, which takes a few seconds.
-        </p>
-      )}
-
       <DialogFooter>
         <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
           Cancel
         </Button>
         <Button type="submit" disabled={busy}>
           {busy && <Loader2 className="animate-spin" />}
-          {isCreate ? (busy ? "Deploying…" : "Deploy") : "Save"}
+          {isCreate ? "Deploy" : "Save"}
         </Button>
       </DialogFooter>
     </form>

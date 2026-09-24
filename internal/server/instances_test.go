@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -217,6 +219,79 @@ func TestFailedDeployRollsBack(t *testing.T) {
 	if in := p.createInstance(map[string]any{"name": "Home"}); in.Status.State != "running" {
 		t.Fatalf("retry after fixing the cause should work: %+v", in)
 	}
+}
+
+func (p *panel) provision(body map[string]any) []map[string]json.RawMessage {
+	p.t.Helper()
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest("POST", "/api/instances", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/x-ndjson")
+	req.AddCookie(p.cookie)
+	rec := httptest.NewRecorder()
+	p.s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/x-ndjson" {
+		p.t.Fatalf("want a 200 ndjson stream, got %d %q: %s", rec.Code, rec.Header().Get("Content-Type"), rec.Body)
+	}
+
+	var events []map[string]json.RawMessage
+	for line := range strings.Lines(rec.Body.String()) {
+		var ev map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			p.t.Fatalf("bad line %q: %v", line, err)
+		}
+		events = append(events, ev)
+	}
+	return events
+}
+
+func TestProvisionStream(t *testing.T) {
+	p := newPanel(t)
+
+	events := p.provision(map[string]any{"name": "Home"})
+	var steps []string
+	for _, ev := range events[:len(events)-1] {
+		steps = append(steps, strings.Trim(string(ev["step"]), `"`))
+	}
+	if want := []string{"image", "container", "interface", "firewall", "nat"}; !slices.Equal(steps, want) {
+		t.Fatalf("steps = %v, want %v", steps, want)
+	}
+	var in instanceJSON
+	if err := json.Unmarshal(events[len(events)-1]["instance"], &in); err != nil || in.Status.State != "running" {
+		t.Fatalf("last event should carry the running instance: %s", events[len(events)-1]["instance"])
+	}
+}
+
+func TestProvisionStreamFailure(t *testing.T) {
+	p := newPanel(t)
+	p.fake.BootLog = "RTNETLINK answers: Operation not supported\n"
+	p.fake.BootExitCode = 1
+
+	events := p.provision(map[string]any{"name": "Home"})
+	last := events[len(events)-1]
+	var e struct{ Code, Message string }
+	var log []string
+	json.Unmarshal(last["error"], &e)
+	json.Unmarshal(last["log"], &log)
+	if e.Code != "deploy_failed" || !slices.Equal(log, []string{"RTNETLINK answers: Operation not supported"}) {
+		t.Fatalf("want the failure with the container output, got %v", last)
+	}
+
+	var list []instanceJSON
+	p.want(p.do("GET", "/api/instances", nil), http.StatusOK, &list)
+	if len(list) != 0 {
+		t.Fatalf("instance should be rolled back, list = %+v", list)
+	}
+}
+
+func TestProvisionStreamValidatesFirst(t *testing.T) {
+	p := newPanel(t)
+	req := httptest.NewRequest("POST", "/api/instances", strings.NewReader(`{"name":""}`))
+	req.Header.Set("Accept", "application/x-ndjson")
+	req.AddCookie(p.cookie)
+	rec := httptest.NewRecorder()
+	p.s.ServeHTTP(rec, req)
+	p.wantError(rec, http.StatusUnprocessableEntity, "validation_failed")
 }
 
 func TestCreateInstanceWithDockerDown(t *testing.T) {

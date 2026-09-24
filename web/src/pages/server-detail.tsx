@@ -373,7 +373,7 @@ function PeersCard({ instance, peers, error, reload }: {
                     <TableCell>
                       <PeerStatus
                         enabled={peer.enabled}
-                        online={isOnline(peer, now)}
+                        online={isOnline(peer)}
                         lastSeen={handshake && formatRelative(handshake, now)}
                       />
                     </TableCell>

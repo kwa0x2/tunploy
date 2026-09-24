@@ -23,13 +23,9 @@ export function formatRelative(iso: string, now = Date.now()): string {
   return `${Math.round(hours / 24)}d ago`
 }
 
-// WireGuard renews the handshake every two minutes while a peer is connected,
-// so an older one means the peer has gone quiet.
-const onlineWindowMs = 3 * 60 * 1000
-
-export function isOnline(peer: Peer, now = Date.now()): boolean {
-  const handshake = peer.stats?.latest_handshake
-  return Boolean(handshake) && now - new Date(handshake!).getTime() < onlineWindowMs
+// The server decides, since it can watch the traffic counters between polls.
+export function isOnline(peer: Peer): boolean {
+  return peer.stats?.online ?? false
 }
 
 export function endpointOf(instance: Instance): string {

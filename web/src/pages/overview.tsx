@@ -20,6 +20,8 @@ import { cn } from "@/lib/utils"
 
 type FleetPeer = Fleet["peers"][number]
 
+const brandTone = "bg-yellow-400/20 text-yellow-700 dark:text-yellow-300"
+
 const totalBytes = (p: FleetPeer) => (p.stats ? p.stats.rx_bytes + p.stats.tx_bytes : 0)
 
 export function OverviewPage() {
@@ -29,7 +31,7 @@ export function OverviewPage() {
   const now = useNow()
 
   const data = fleet.data
-  const online = data?.peers.filter((p) => isOnline(p, now)) ?? []
+  const online = data?.peers.filter((p) => isOnline(p)) ?? []
   const enabled = data?.peers.filter((p) => p.enabled) ?? []
   const running = data?.instances.filter((i) => i.status.state === "running") ?? []
   // Devices download what the server sends them, so tx is their download.
@@ -38,14 +40,15 @@ export function OverviewPage() {
 
   return (
     <>
-      <Hero
+      <Greeting
         summary={
           data &&
           (data.instances.length === 0
             ? "Let's get your first VPN server running."
             : `${running.length} of ${data.instances.length} ${plural(data.instances.length, "server")} running · ${online.length} ${plural(online.length, "device")} online right now.`)
         }
-        onCreate={() => setCreating(true)}
+        // The getting-started card has its own button; one is enough.
+        onCreate={data?.instances.length ? () => setCreating(true) : undefined}
       />
 
       {docker.data && !docker.data.available && (
@@ -58,43 +61,45 @@ export function OverviewPage() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-        <StatTile
-          label="VPN servers"
-          value={data?.instances.length}
-          detail={`${running.length} running`}
-          icon={Server}
-          tone="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
-        />
-        <StatTile
-          label="Devices"
-          value={data?.peers.length}
-          detail={`${enabled.length} enabled`}
-          icon={Smartphone}
-          tone="bg-sky-500/10 text-sky-600 dark:text-sky-400"
-        />
-        <StatTile
-          label="Online now"
-          value={data && online.length}
-          detail={enabled.length ? `of ${enabled.length} enabled ${plural(enabled.length, "device")}` : "No devices yet"}
-          icon={Wifi}
-          tone="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-        />
-        <StatTile
-          label="Traffic"
-          value={data && formatBytes(down + up)}
-          detail={`↓ ${formatBytes(down)} · ↑ ${formatBytes(up)}`}
-          icon={ArrowDownUp}
-          tone="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
-        />
-      </div>
+      {data?.instances.length !== 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <StatTile
+            label="VPN servers"
+            value={data?.instances.length}
+            detail={`${running.length} running`}
+            icon={Server}
+            tone={brandTone}
+          />
+          <StatTile
+            label="Devices"
+            value={data?.peers.length}
+            detail={`${enabled.length} enabled`}
+            icon={Smartphone}
+            tone="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+          />
+          <StatTile
+            label="Online now"
+            value={data && online.length}
+            detail={enabled.length ? `of ${enabled.length} enabled ${plural(enabled.length, "device")}` : "No devices yet"}
+            icon={Wifi}
+            tone="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+          />
+          <StatTile
+            label="Traffic"
+            value={data && formatBytes(down + up)}
+            detail={`↓ ${formatBytes(down)} · ↑ ${formatBytes(up)}`}
+            icon={ArrowDownUp}
+            tone="bg-violet-500/10 text-violet-600 dark:text-violet-400"
+          />
+        </div>
+      )}
 
-      <div className="mt-6">
+      <div className={cn(data?.instances.length !== 0 && "mt-6")}>
         {!data && <Skeleton className="h-64 rounded-xl" />}
         {data?.instances.length === 0 && <GetStarted onCreate={() => setCreating(true)} />}
         {data && data.instances.length > 0 && (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-            <ServersCard instances={data.instances} peers={data.peers} now={now} />
+            <ServersCard instances={data.instances} peers={data.peers} />
             <div className="grid content-start gap-6">
               <TopTrafficCard peers={data.peers} />
               <RecentCard peers={data.peers} now={now} />
@@ -119,43 +124,25 @@ function greeting(hour: number) {
   return "Good evening"
 }
 
-function Hero({ summary, onCreate }: { summary?: ReactNode; onCreate: () => void }) {
+function Greeting({ summary, onCreate }: { summary?: ReactNode; onCreate?: () => void }) {
   const { user } = useAuth()
   const firstName = user?.name.split(/\s+/)[0]
 
   return (
-    <div className="relative mb-6 overflow-hidden rounded-2xl bg-linear-to-br from-indigo-600 via-violet-600 to-sky-500 p-6 text-white shadow-lg shadow-indigo-500/20 md:p-8">
-      {/* Decorative glow; aria-hidden so screen readers skip it. */}
-      <div aria-hidden className="absolute -top-24 -right-16 size-72 rounded-full bg-white/15 blur-3xl" />
-      <div aria-hidden className="absolute -bottom-32 left-1/3 size-72 rounded-full bg-sky-300/25 blur-3xl" />
-      <div className="relative flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
-            {greeting(new Date().getHours())}
-            {firstName ? `, ${firstName}` : ""}
-          </h1>
-          <p className="text-sm text-white/80 md:text-base">{summary ?? " "}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="secondary"
-            className="bg-white text-indigo-700 hover:bg-white/90"
-            onClick={onCreate}
-          >
-            <Plus />
-            New server
-          </Button>
-          <Button
-            variant="ghost"
-            className="text-white hover:bg-white/15 hover:text-white"
-            nativeButton={false}
-            render={<Link to="/servers" />}
-          >
-            All servers
-            <ArrowRight />
-          </Button>
-        </div>
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
+          {greeting(new Date().getHours())}
+          {firstName ? `, ${firstName}` : ""}
+        </h1>
+        <p className="text-muted-foreground text-sm md:text-base">{summary ?? " "}</p>
       </div>
+      {onCreate && (
+        <Button onClick={onCreate}>
+          <Plus />
+          New server
+        </Button>
+      )}
     </div>
   )
 }
@@ -187,7 +174,7 @@ function StatTile({ label, value, detail, icon: Icon, tone }: {
   )
 }
 
-function ServersCard({ instances, peers, now }: { instances: Instance[]; peers: FleetPeer[]; now: number }) {
+function ServersCard({ instances, peers }: { instances: Instance[]; peers: FleetPeer[] }) {
   return (
     <Card className="self-start">
       <CardHeader>
@@ -204,7 +191,7 @@ function ServersCard({ instances, peers, now }: { instances: Instance[]; peers: 
         {instances.map((instance) => {
           const own = peers.filter((p) => p.instance_id === instance.id)
           const enabled = own.filter((p) => p.enabled).length
-          const online = own.filter((p) => isOnline(p, now)).length
+          const online = own.filter((p) => isOnline(p)).length
           const traffic = own.reduce((sum, p) => sum + totalBytes(p), 0)
           return (
             <Link
@@ -214,7 +201,7 @@ function ServersCard({ instances, peers, now }: { instances: Instance[]; peers: 
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
-                  <div className="bg-primary/10 text-primary grid size-9 shrink-0 place-items-center rounded-lg">
+                  <div className={cn("grid size-9 shrink-0 place-items-center rounded-lg", brandTone)}>
                     <Server className="size-4" />
                   </div>
                   <div className="min-w-0">
@@ -289,7 +276,7 @@ function TopTrafficCard({ peers }: { peers: FleetPeer[] }) {
                 </div>
                 <div className="bg-muted h-2 overflow-hidden rounded-full">
                   <div
-                    className="bg-primary h-full rounded-full"
+                    className="bg-chart-1 h-full rounded-full"
                     style={{ width: `${Math.max(2, (totalBytes(peer) / max) * 100)}%` }}
                   />
                 </div>
@@ -331,7 +318,7 @@ function RecentCard({ peers, now }: { peers: FleetPeer[]; now: number }) {
                 </div>
                 <PeerStatus
                   enabled={peer.enabled}
-                  online={isOnline(peer, now)}
+                  online={isOnline(peer)}
                   lastSeen={formatRelative(peer.stats!.latest_handshake!, now)}
                 />
               </li>
@@ -348,7 +335,7 @@ const steps = [
     icon: Server,
     title: "Deploy a server",
     text: "One click. Subnet, port and keys are picked for you.",
-    tone: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+    tone: brandTone,
   },
   {
     icon: Smartphone,

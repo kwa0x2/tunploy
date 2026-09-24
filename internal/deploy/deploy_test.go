@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -256,5 +257,40 @@ func TestStatusReportsCrashLoop(t *testing.T) {
 
 	if got := f.m.Status(context.Background(), in.ID); got.State != StateRestarting || got.Error == "" {
 		t.Fatalf("status = %+v", got)
+	}
+}
+
+func TestProvisionReportsSteps(t *testing.T) {
+	f := newFixture(t)
+	in := f.instance(t, "Home", 51820)
+
+	var steps []Step
+	if err := f.m.Provision(context.Background(), in.ID, func(s Step) { steps = append(steps, s) }); err != nil {
+		t.Fatal(err)
+	}
+	want := []Step{StepImage, StepContainer, StepInterface, StepFirewall, StepNAT}
+	if !slices.Equal(steps, want) {
+		t.Fatalf("steps = %v, want %v", steps, want)
+	}
+}
+
+func TestProvisionFailsWhenBootFails(t *testing.T) {
+	f := newFixture(t)
+	in := f.instance(t, "Home", 51820)
+	f.docker.BootLog = "2026-09-24T10:00:00.123456789Z [#] ip link add wg0 type wireguard\n" +
+		"RTNETLINK answers: Operation not supported\n"
+	f.docker.BootExitCode = 1
+
+	err := f.m.Provision(context.Background(), in.ID, nil)
+	var boot *BootError
+	if !errors.As(err, &boot) {
+		t.Fatalf("want a BootError, got %v", err)
+	}
+	if !strings.Contains(boot.Reason, "code 1") {
+		t.Errorf("reason = %q", boot.Reason)
+	}
+	want := []string{"[#] ip link add wg0 type wireguard", "RTNETLINK answers: Operation not supported"}
+	if !slices.Equal(boot.Log, want) {
+		t.Errorf("log = %q, want %q", boot.Log, want)
 	}
 }

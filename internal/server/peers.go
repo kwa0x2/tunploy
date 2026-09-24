@@ -35,7 +35,7 @@ func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) error {
 
 	// Stats are a bonus: the list still has to load while the interface is
 	// coming up or Docker is away.
-	stats, err := s.deploy.PeerStats(r.Context(), in.ID)
+	stats, err := s.deploy.PeerStats(r.Context(), in)
 	if err != nil {
 		slog.Warn("read peer stats", "instance", in.ID, "error", err)
 	}

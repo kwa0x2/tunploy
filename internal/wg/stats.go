@@ -12,6 +12,8 @@ type PeerStats struct {
 	LatestHandshake *time.Time `json:"latest_handshake,omitempty"`
 	RxBytes         int64      `json:"rx_bytes"`
 	TxBytes         int64      `json:"tx_bytes"`
+	// Online is left for the caller, which can watch the counters over time.
+	Online bool `json:"online"`
 }
 
 // ParseDump reads `wg show <iface> dump`: an interface line, then one

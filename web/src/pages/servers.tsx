@@ -64,10 +64,10 @@ export function ServersPage() {
 function ServerCard({ instance }: { instance: Instance }) {
   return (
     <Link to={`/servers/${instance.id}`} className="group rounded-xl outline-none">
-      <Card className="group-hover:ring-primary/30 group-focus-visible:ring-ring h-full transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-indigo-500/10 motion-reduce:transform-none">
+      <Card className="group-hover:ring-primary/30 group-focus-visible:ring-ring h-full transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-amber-500/10 motion-reduce:transform-none">
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="bg-primary/10 text-primary grid size-9 shrink-0 place-items-center rounded-lg">
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-yellow-400/20 text-yellow-700 dark:text-yellow-300">
               <Server className="size-4" />
             </div>
             <CardTitle className="truncate">{instance.name}</CardTitle>
