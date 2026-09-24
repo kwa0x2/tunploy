@@ -9,6 +9,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
+	"github.com/kwa0x2/tunploy/internal/web"
 )
 
 const (
@@ -56,6 +57,7 @@ func (s *Server) routes() http.Handler {
 	}))
 
 	mux.Handle("/api/", chain(private, s.requireAuth))
+	mux.Handle("/", web.Handler())
 
 	return mux
 }

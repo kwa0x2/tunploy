@@ -2,10 +2,13 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,7 +73,8 @@ func TestSetupAndLoginFlow(t *testing.T) {
 	}
 
 	creds := map[string]string{"email": "Admin@Example.com", "password": "hunter2hunter2"}
-	rec = do(t, s, "POST", "/api/setup", creds)
+	signup := map[string]string{"name": "Kwa", "email": "Admin@Example.com", "password": "hunter2hunter2"}
+	rec = do(t, s, "POST", "/api/setup", signup)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("setup: want 201, got %d: %s", rec.Code, rec.Body)
 	}
@@ -96,7 +100,7 @@ func TestSetupAndLoginFlow(t *testing.T) {
 	}
 
 	rec = do(t, s, "POST", "/api/setup", map[string]string{
-		"email": "attacker@example.com", "password": "hunter2hunter2",
+		"name": "Attacker", "email": "attacker@example.com", "password": "hunter2hunter2",
 	})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("second setup: want 409, got %d", rec.Code)
@@ -146,7 +150,7 @@ func TestProtectedRoutesRejectAnonymous(t *testing.T) {
 func TestLoginRejectsWrongPassword(t *testing.T) {
 	s := newTestServer(t)
 	do(t, s, "POST", "/api/setup", map[string]string{
-		"email": "admin@example.com", "password": "hunter2hunter2",
+		"name": "Kwa", "email": "admin@example.com", "password": "hunter2hunter2",
 	})
 
 	rec := do(t, s, "POST", "/api/auth/login", map[string]string{
@@ -167,7 +171,7 @@ func TestLoginRejectsWrongPassword(t *testing.T) {
 func TestLoginThrottleBlocksBruteForce(t *testing.T) {
 	s := newTestServer(t)
 	do(t, s, "POST", "/api/setup", map[string]string{
-		"email": "admin@example.com", "password": "hunter2hunter2",
+		"name": "Kwa", "email": "admin@example.com", "password": "hunter2hunter2",
 	})
 
 	wrong := map[string]string{"email": "admin@example.com", "password": "wrong-password"}
@@ -213,7 +217,7 @@ func TestSetupValidatesInput(t *testing.T) {
 func TestUnknownFieldsAreRejected(t *testing.T) {
 	s := newTestServer(t)
 	rec := do(t, s, "POST", "/api/setup", map[string]string{
-		"email": "admin@example.com", "password": "hunter2hunter2", "role": "admin",
+		"name": "Kwa", "email": "admin@example.com", "password": "hunter2hunter2", "role": "admin",
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 for an unknown field, got %d", rec.Code)
@@ -231,5 +235,64 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 	t.Helper()
 	if err := json.Unmarshal(rec.Body.Bytes(), v); err != nil {
 		t.Fatalf("decode response %q: %v", rec.Body.String(), err)
+	}
+}
+
+// Two people hitting setup at the same moment must not both become admin:
+// this is the flaw that a count-then-insert would leave open.
+func TestConcurrentSetupCreatesOneAdmin(t *testing.T) {
+	s := newTestServer(t)
+
+	const attempts = 8
+	var wg sync.WaitGroup
+	codes := make([]int, attempts)
+
+	start := make(chan struct{})
+	for i := range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := do(t, s, "POST", "/api/setup", map[string]string{
+				"name":     fmt.Sprintf("Admin %d", i),
+				"email":    fmt.Sprintf("admin%d@example.com", i),
+				"password": "hunter2hunter2",
+			})
+			codes[i] = rec.Code
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	created := 0
+	for i, code := range codes {
+		switch code {
+		case http.StatusCreated:
+			created++
+		case http.StatusConflict:
+		default:
+			t.Errorf("request %d: want 201 or 409, got %d", i, code)
+		}
+	}
+	if created != 1 {
+		t.Fatalf("want exactly one admin created, got %d", created)
+	}
+
+	n, err := s.store.CountUsers(context.Background())
+	if err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want 1 user in the database, got %d", n)
+	}
+}
+
+func TestSetupRequiresName(t *testing.T) {
+	s := newTestServer(t)
+	rec := do(t, s, "POST", "/api/setup", map[string]string{
+		"email": "admin@example.com", "password": "hunter2hunter2",
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422 without a name, got %d: %s", rec.Code, rec.Body)
 	}
 }

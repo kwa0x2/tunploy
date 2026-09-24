@@ -15,6 +15,7 @@ var ErrDuplicate = errors.New("store: already exists")
 
 type User struct {
 	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
 	Email        string    `json:"email"`
 	PasswordHash string    `json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -35,26 +36,58 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (*User, error) {
+func (s *Store) CreateUser(ctx context.Context, name, email, passwordHash string) (*User, error) {
 	now := time.Now().Unix()
 	email = NormalizeEmail(email)
 
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		email, passwordHash, now, now)
+		`INSERT INTO users (name, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		name, email, passwordHash, now, now)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, ErrDuplicate
 		}
 		return nil, fmt.Errorf("create user: %w", err)
 	}
+	return s.userFromInsert(res, name, email, passwordHash, now)
+}
 
+// CreateFirstUser creates the administrator only while the table is empty.
+// The emptiness check lives inside the INSERT because a separate count would
+// let two concurrent requests each believe they are the first.
+func (s *Store) CreateFirstUser(ctx context.Context, name, email, passwordHash string) (*User, error) {
+	now := time.Now().Unix()
+	email = NormalizeEmail(email)
+
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO users (name, email, password_hash, created_at, updated_at)
+		 SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)`,
+		name, email, passwordHash, now, now)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicate
+		}
+		return nil, fmt.Errorf("create first user: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("create first user: %w", err)
+	}
+	if affected == 0 {
+		return nil, ErrDuplicate
+	}
+	return s.userFromInsert(res, name, email, passwordHash, now)
+}
+
+func (s *Store) userFromInsert(res sql.Result, name, email, passwordHash string, now int64) (*User, error) {
 	id, err := res.LastInsertId()
 	if err != nil {
-		return nil, fmt.Errorf("create user: %w", err)
+		return nil, fmt.Errorf("read inserted user id: %w", err)
 	}
 	return &User{
 		ID:           id,
+		Name:         name,
 		Email:        email,
 		PasswordHash: passwordHash,
 		CreatedAt:    time.Unix(now, 0).UTC(),
@@ -64,13 +97,13 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (*Us
 
 func (s *Store) UserByEmail(ctx context.Context, email string) (*User, error) {
 	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, created_at, updated_at FROM users WHERE email = ?`,
+		`SELECT id, name, email, password_hash, created_at, updated_at FROM users WHERE email = ?`,
 		NormalizeEmail(email)))
 }
 
 func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
 	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, created_at, updated_at FROM users WHERE id = ?`, id))
+		`SELECT id, name, email, password_hash, created_at, updated_at FROM users WHERE id = ?`, id))
 }
 
 func (s *Store) UpdateUserPassword(ctx context.Context, id int64, passwordHash string) error {
@@ -93,7 +126,7 @@ func (s *Store) UpdateUserPassword(ctx context.Context, id int64, passwordHash s
 func (s *Store) scanUser(row *sql.Row) (*User, error) {
 	var u User
 	var created, updated int64
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &created, &updated); err != nil {
+	if err := row.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

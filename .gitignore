@@ -38,4 +38,7 @@ go.work.sum
 
 # Frontend
 node_modules/
-web/dist/
+
+# Embedded frontend build output; the placeholder keeps go:embed happy
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep

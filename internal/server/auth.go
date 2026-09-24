@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/mail"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/auth"
@@ -17,6 +18,7 @@ const (
 	sessionCookie     = "tunploy_session"
 	minPasswordLength = 8
 	maxPasswordLength = 256
+	maxNameLength     = 80
 )
 
 type credentials struct {
@@ -24,14 +26,21 @@ type credentials struct {
 	Password string `json:"password"`
 }
 
+type registration struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
 type userResponse struct {
 	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
 	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 func newUserResponse(u *store.User) userResponse {
-	return userResponse{ID: u.ID, Email: u.Email, CreatedAt: u.CreatedAt}
+	return userResponse{ID: u.ID, Name: u.Name, Email: u.Email, CreatedAt: u.CreatedAt}
 }
 
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) error {
@@ -45,20 +54,12 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) error
 // handleSetup creates the first administrator. It stays open only while the
 // panel has no users at all.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) error {
-	var req credentials
+	var req registration
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-	if err := validateCredentials(req); err != nil {
+	if err := validateRegistration(req); err != nil {
 		return err
-	}
-
-	n, err := s.store.CountUsers(r.Context())
-	if err != nil {
-		return err
-	}
-	if n > 0 {
-		return httpx.Conflict("setup has already been completed")
 	}
 
 	hash, err := auth.HashPassword(req.Password)
@@ -66,7 +67,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	user, err := s.store.CreateUser(r.Context(), req.Email, hash)
+	user, err := s.store.CreateFirstUser(r.Context(), strings.TrimSpace(req.Name), req.Email, hash)
 	if err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
 			return httpx.Conflict("setup has already been completed")
@@ -211,7 +212,23 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 	})
 }
 
-func validateCredentials(c credentials) error {
+func validateRegistration(r registration) error {
+	fields := validateCredentialFields(credentials{Email: r.Email, Password: r.Password})
+
+	switch name := strings.TrimSpace(r.Name); {
+	case name == "":
+		fields["name"] = "name is required"
+	case len(name) > maxNameLength:
+		fields["name"] = "name must be at most 80 characters"
+	}
+
+	if len(fields) > 0 {
+		return httpx.Invalid(fields)
+	}
+	return nil
+}
+
+func validateCredentialFields(c credentials) map[string]string {
 	fields := map[string]string{}
 
 	email := store.NormalizeEmail(c.Email)
@@ -230,10 +247,7 @@ func validateCredentials(c credentials) error {
 		fields["password"] = "password must be at most 256 characters"
 	}
 
-	if len(fields) > 0 {
-		return httpx.Invalid(fields)
-	}
-	return nil
+	return fields
 }
 
 func clientIP(r *http.Request) string {

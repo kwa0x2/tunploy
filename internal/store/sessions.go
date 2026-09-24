@@ -30,7 +30,7 @@ func (s *Store) CreateSession(ctx context.Context, tokenHash string, userID int6
 // session as absent.
 func (s *Store) UserBySessionToken(ctx context.Context, tokenHash string) (*User, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT u.id, u.email, u.password_hash, u.created_at, u.updated_at
+		`SELECT u.id, u.name, u.email, u.password_hash, u.created_at, u.updated_at
 		 FROM sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.token_hash = ? AND s.expires_at > ?`,
 		tokenHash, time.Now().Unix())
