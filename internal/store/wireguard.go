@@ -1,0 +1,307 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/netip"
+	"strings"
+	"time"
+
+	"github.com/kwa0x2/tunploy/internal/wg"
+)
+
+const instanceColumns = `id, name, address, listen_port, private_key, public_key, endpoint,
+	dns, mtu, persistent_keepalive, client_allowed_ips, created_at, updated_at`
+
+const peerColumns = `id, instance_id, name, address, private_key, public_key, preshared_key,
+	enabled, created_at, updated_at`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func (s *Store) CreateInstance(ctx context.Context, in wg.Instance) (*wg.Instance, error) {
+	now := time.Now().Unix()
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO wg_instances (name, address, listen_port, private_key, public_key, endpoint,
+			dns, mtu, persistent_keepalive, client_allowed_ips, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.Name, in.Address.String(), in.ListenPort, in.PrivateKey.String(), in.PublicKey.String(),
+		in.Endpoint, joinList(in.DNS), in.MTU, in.PersistentKeepalive, joinList(in.ClientAllowedIPs),
+		now, now)
+	if err != nil {
+		return nil, writeError("create instance", err)
+	}
+	if in.ID, err = res.LastInsertId(); err != nil {
+		return nil, fmt.Errorf("read inserted instance id: %w", err)
+	}
+	in.CreatedAt = time.Unix(now, 0).UTC()
+	in.UpdatedAt = in.CreatedAt
+	return &in, nil
+}
+
+func (s *Store) Instances(ctx context.Context) ([]wg.Instance, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+instanceColumns+` FROM wg_instances ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list instances: %w", err)
+	}
+	defer rows.Close()
+
+	instances := []wg.Instance{}
+	for rows.Next() {
+		in, err := scanInstance(rows)
+		if err != nil {
+			return nil, err
+		}
+		instances = append(instances, *in)
+	}
+	return instances, rows.Err()
+}
+
+func (s *Store) InstanceByID(ctx context.Context, id int64) (*wg.Instance, error) {
+	return scanInstance(s.db.QueryRowContext(ctx,
+		`SELECT `+instanceColumns+` FROM wg_instances WHERE id = ?`, id))
+}
+
+// UpdateInstance leaves the address and keys alone: changing either would
+// break every config already handed out to peers.
+func (s *Store) UpdateInstance(ctx context.Context, in wg.Instance) (*wg.Instance, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE wg_instances SET name = ?, listen_port = ?, endpoint = ?, dns = ?, mtu = ?,
+			persistent_keepalive = ?, client_allowed_ips = ?, updated_at = ?
+		 WHERE id = ?`,
+		in.Name, in.ListenPort, in.Endpoint, joinList(in.DNS), in.MTU,
+		in.PersistentKeepalive, joinList(in.ClientAllowedIPs), time.Now().Unix(), in.ID)
+	if err != nil {
+		return nil, writeError("update instance", err)
+	}
+	if err := expectOneRow(res, "update instance"); err != nil {
+		return nil, err
+	}
+	return s.InstanceByID(ctx, in.ID)
+}
+
+// DeleteInstance also removes the instance's peers.
+func (s *Store) DeleteInstance(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM wg_instances WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete instance: %w", err)
+	}
+	return expectOneRow(res, "delete instance")
+}
+
+// CreatePeer assigns the lowest free address in the instance's subnet.
+// Allocation and insert share a transaction, and with the pool capped at one
+// connection that serialises concurrent creates.
+func (s *Store) CreatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin create peer: %w", err)
+	}
+	defer tx.Rollback()
+
+	var raw string
+	err = tx.QueryRowContext(ctx, `SELECT address FROM wg_instances WHERE id = ?`, p.InstanceID).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("load instance address: %w", err)
+	}
+	server, err := netip.ParsePrefix(raw)
+	if err != nil {
+		return nil, fmt.Errorf("instance %d has a corrupt address: %w", p.InstanceID, err)
+	}
+
+	used, err := peerAddresses(ctx, tx, p.InstanceID)
+	if err != nil {
+		return nil, err
+	}
+	if p.Address, err = wg.NextAddress(server.Masked(), append(used, server.Addr())); err != nil {
+		return nil, err
+	}
+
+	now := time.Now().Unix()
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO wg_peers (instance_id, name, address, private_key, public_key, preshared_key,
+			enabled, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.InstanceID, p.Name, p.Address.String(), p.PrivateKey.String(), p.PublicKey.String(),
+		p.PresharedKey.String(), p.Enabled, now, now)
+	if err != nil {
+		return nil, writeError("create peer", err)
+	}
+	if p.ID, err = res.LastInsertId(); err != nil {
+		return nil, fmt.Errorf("read inserted peer id: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit create peer: %w", err)
+	}
+
+	p.CreatedAt = time.Unix(now, 0).UTC()
+	p.UpdatedAt = p.CreatedAt
+	return &p, nil
+}
+
+func peerAddresses(ctx context.Context, tx *sql.Tx, instanceID int64) ([]netip.Addr, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT address FROM wg_peers WHERE instance_id = ?`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list peer addresses: %w", err)
+	}
+	defer rows.Close()
+
+	var used []netip.Addr
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan peer address: %w", err)
+		}
+		a, err := netip.ParseAddr(raw)
+		if err != nil {
+			return nil, fmt.Errorf("peer address %q is corrupt: %w", raw, err)
+		}
+		used = append(used, a)
+	}
+	return used, rows.Err()
+}
+
+func (s *Store) Peers(ctx context.Context, instanceID int64) ([]wg.Peer, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+peerColumns+` FROM wg_peers WHERE instance_id = ? ORDER BY id`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list peers: %w", err)
+	}
+	defer rows.Close()
+
+	peers := []wg.Peer{}
+	for rows.Next() {
+		p, err := scanPeer(rows)
+		if err != nil {
+			return nil, err
+		}
+		peers = append(peers, *p)
+	}
+	return peers, rows.Err()
+}
+
+func (s *Store) PeerByID(ctx context.Context, id int64) (*wg.Peer, error) {
+	return scanPeer(s.db.QueryRowContext(ctx, `SELECT `+peerColumns+` FROM wg_peers WHERE id = ?`, id))
+}
+
+func (s *Store) UpdatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE wg_peers SET name = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+		p.Name, p.Enabled, time.Now().Unix(), p.ID)
+	if err != nil {
+		return nil, writeError("update peer", err)
+	}
+	if err := expectOneRow(res, "update peer"); err != nil {
+		return nil, err
+	}
+	return s.PeerByID(ctx, p.ID)
+}
+
+func (s *Store) DeletePeer(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM wg_peers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete peer: %w", err)
+	}
+	return expectOneRow(res, "delete peer")
+}
+
+func scanInstance(row rowScanner) (*wg.Instance, error) {
+	var (
+		in                                  wg.Instance
+		address, priv, pub, dns, allowedIPs string
+		created, updated                    int64
+	)
+	err := row.Scan(&in.ID, &in.Name, &address, &in.ListenPort, &priv, &pub, &in.Endpoint,
+		&dns, &in.MTU, &in.PersistentKeepalive, &allowedIPs, &created, &updated)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("scan instance: %w", err)
+	}
+
+	var errs [5]error
+	in.Address, errs[0] = netip.ParsePrefix(address)
+	in.PrivateKey, errs[1] = wg.ParseKey(priv)
+	in.PublicKey, errs[2] = wg.ParseKey(pub)
+	in.DNS, errs[3] = parseList(dns, netip.ParseAddr)
+	in.ClientAllowedIPs, errs[4] = parseList(allowedIPs, netip.ParsePrefix)
+	if err := errors.Join(errs[:]...); err != nil {
+		return nil, fmt.Errorf("instance %d has corrupt data: %w", in.ID, err)
+	}
+
+	in.CreatedAt = time.Unix(created, 0).UTC()
+	in.UpdatedAt = time.Unix(updated, 0).UTC()
+	return &in, nil
+}
+
+func scanPeer(row rowScanner) (*wg.Peer, error) {
+	var (
+		p                       wg.Peer
+		address, priv, pub, psk string
+		created, updated        int64
+	)
+	err := row.Scan(&p.ID, &p.InstanceID, &p.Name, &address, &priv, &pub, &psk,
+		&p.Enabled, &created, &updated)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("scan peer: %w", err)
+	}
+
+	var errs [4]error
+	p.Address, errs[0] = netip.ParseAddr(address)
+	p.PrivateKey, errs[1] = wg.ParseKey(priv)
+	p.PublicKey, errs[2] = wg.ParseKey(pub)
+	p.PresharedKey, errs[3] = wg.ParseKey(psk)
+	if err := errors.Join(errs[:]...); err != nil {
+		return nil, fmt.Errorf("peer %d has corrupt data: %w", p.ID, err)
+	}
+
+	p.CreatedAt = time.Unix(created, 0).UTC()
+	p.UpdatedAt = time.Unix(updated, 0).UTC()
+	return &p, nil
+}
+
+func expectOneRow(res sql.Result, op string) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func joinList[T fmt.Stringer](items []T) string {
+	parts := make([]string, len(items))
+	for i, it := range items {
+		parts[i] = it.String()
+	}
+	return strings.Join(parts, ",")
+}
+
+// parseList returns an empty, non-nil slice for an empty column so the API
+// encodes it as [] rather than null.
+func parseList[T any](s string, parse func(string) (T, error)) ([]T, error) {
+	out := []T{}
+	if s == "" {
+		return out, nil
+	}
+	for part := range strings.SplitSeq(s, ",") {
+		v, err := parse(part)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}

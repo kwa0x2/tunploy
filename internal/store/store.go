@@ -8,11 +8,58 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
-	_ "modernc.org/sqlite" // pure-Go driver, keeps the binary cgo-free
+	"modernc.org/sqlite" // pure-Go driver, keeps the binary cgo-free
 )
 
-var ErrNotFound = errors.New("store: not found")
+var (
+	ErrNotFound  = errors.New("store: not found")
+	ErrDuplicate = errors.New("store: already exists")
+)
+
+// DuplicateError names the column a write collided on, so the API can point
+// at the offending field. It matches ErrDuplicate under errors.Is.
+type DuplicateError struct {
+	Column string
+}
+
+func (e *DuplicateError) Error() string { return "store: duplicate " + e.Column }
+
+func (e *DuplicateError) Is(target error) bool { return target == ErrDuplicate }
+
+// sqliteConstraintUnique is SQLITE_CONSTRAINT_UNIQUE.
+const sqliteConstraintUnique = 2067
+
+func isUniqueViolation(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUnique
+}
+
+// asDuplicate reads the column out of SQLite's message, e.g. "UNIQUE
+// constraint failed: wg_peers.instance_id, wg_peers.name". Composite indexes
+// are scoped by their leading columns, so the last one is what clashed.
+func asDuplicate(err error) *DuplicateError {
+	if !isUniqueViolation(err) {
+		return nil
+	}
+	_, cols, ok := strings.Cut(err.Error(), "UNIQUE constraint failed: ")
+	if !ok {
+		return &DuplicateError{}
+	}
+	cols, _, _ = strings.Cut(cols, " (")
+	last := strings.TrimSpace(cols[strings.LastIndex(cols, ",")+1:])
+	_, col, _ := strings.Cut(last, ".")
+	return &DuplicateError{Column: col}
+}
+
+// writeError keeps duplicate errors typed and wraps everything else.
+func writeError(op string, err error) error {
+	if dup := asDuplicate(err); dup != nil {
+		return dup
+	}
+	return fmt.Errorf("%s: %w", op, err)
+}
 
 type Store struct {
 	db *sql.DB

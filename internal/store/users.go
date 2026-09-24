@@ -7,11 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"modernc.org/sqlite"
 )
-
-var ErrDuplicate = errors.New("store: already exists")
 
 type User struct {
 	ID           int64     `json:"id"`
@@ -135,12 +131,4 @@ func (s *Store) scanUser(row *sql.Row) (*User, error) {
 	u.CreatedAt = time.Unix(created, 0).UTC()
 	u.UpdatedAt = time.Unix(updated, 0).UTC()
 	return &u, nil
-}
-
-// sqliteConstraintUnique is SQLITE_CONSTRAINT_UNIQUE.
-const sqliteConstraintUnique = 2067
-
-func isUniqueViolation(err error) bool {
-	var sqliteErr *sqlite.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUnique
 }
