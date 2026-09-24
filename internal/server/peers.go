@@ -20,7 +20,8 @@ type peerRequest struct {
 
 type peerView struct {
 	wg.Peer
-	Stats *wg.PeerStats `json:"stats,omitempty"`
+	Stats   *wg.PeerStats `json:"stats,omitempty"`
+	Country string        `json:"country,omitempty"`
 }
 
 func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) error {
@@ -33,8 +34,7 @@ func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	// Stats are a bonus: the list still has to load while the interface is
-	// coming up or Docker is away.
+	// Stats are optional: the list must load while Docker is away.
 	stats, err := s.deploy.PeerStats(r.Context(), in)
 	if err != nil {
 		slog.Warn("read peer stats", "instance", in.ID, "error", err)
@@ -45,6 +45,7 @@ func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) error {
 		views[i] = peerView{Peer: p}
 		if st, ok := stats[p.PublicKey]; ok {
 			views[i].Stats = &st
+			views[i].Country = s.endpointCountry(st.Endpoint)
 		}
 	}
 	return httpx.JSON(w, http.StatusOK, views)
@@ -74,6 +75,7 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) error 
 		}
 		return peerWriteError(err)
 	}
+	s.record(r.Context(), peerEvent("device.created", in, created))
 	if err := s.deploy.Apply(r.Context(), in.ID); err != nil {
 		return applyError(err)
 	}
@@ -81,7 +83,7 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error {
-	p, err := s.peerFromPath(r)
+	in, p, err := s.peerFromPath(r)
 	if err != nil {
 		return err
 	}
@@ -90,6 +92,7 @@ func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 
+	before := *p
 	req.apply(p)
 	if fields := p.Validate(); len(fields) > 0 {
 		return httpx.Invalid(fields)
@@ -98,6 +101,18 @@ func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return peerWriteError(err)
 	}
+	if updated.Name != before.Name {
+		e := peerEvent("device.renamed", in, updated)
+		e.Detail = "was " + before.Name
+		s.record(r.Context(), e)
+	}
+	if updated.Enabled != before.Enabled {
+		kind := "device.disabled"
+		if updated.Enabled {
+			kind = "device.enabled"
+		}
+		s.record(r.Context(), peerEvent(kind, in, updated))
+	}
 	if err := s.deploy.Apply(r.Context(), updated.InstanceID); err != nil {
 		return applyError(err)
 	}
@@ -105,27 +120,23 @@ func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) error {
-	p, err := s.peerFromPath(r)
+	in, p, err := s.peerFromPath(r)
 	if err != nil {
 		return err
 	}
 	if err := s.store.DeletePeer(r.Context(), p.ID); err != nil {
 		return err
 	}
+	s.record(r.Context(), peerEvent("device.deleted", in, p))
 	if err := s.deploy.Apply(r.Context(), p.InstanceID); err != nil {
 		return applyError(err)
 	}
 	return httpx.NoContent(w)
 }
 
-// handlePeerConfig serves the file a client imports. The download name
-// becomes the tunnel name on most clients, which caps it at 15 characters.
+// Most clients name the tunnel after the file, capped at 15 characters.
 func (s *Server) handlePeerConfig(w http.ResponseWriter, r *http.Request) error {
-	p, err := s.peerFromPath(r)
-	if err != nil {
-		return err
-	}
-	in, err := s.store.InstanceByID(r.Context(), p.InstanceID)
+	in, p, err := s.peerFromPath(r)
 	if err != nil {
 		return err
 	}
@@ -138,21 +149,20 @@ func (s *Server) handlePeerConfig(w http.ResponseWriter, r *http.Request) error 
 	return err
 }
 
-// peerFromPath also checks the peer belongs to the instance in the URL.
-func (s *Server) peerFromPath(r *http.Request) (*wg.Peer, error) {
+func (s *Server) peerFromPath(r *http.Request) (*wg.Instance, *wg.Peer, error) {
 	in, err := s.instanceFromPath(r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	id, err := strconv.ParseInt(r.PathValue("peerID"), 10, 64)
 	if err != nil {
-		return nil, httpx.NotFound("peer not found")
+		return nil, nil, httpx.NotFound("peer not found")
 	}
 	p, err := s.store.PeerByID(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && p.InstanceID != in.ID) {
-		return nil, httpx.NotFound("peer not found")
+		return nil, nil, httpx.NotFound("peer not found")
 	}
-	return p, err
+	return in, p, err
 }
 
 func (req peerRequest) apply(p *wg.Peer) {
@@ -172,8 +182,7 @@ func peerWriteError(err error) error {
 	return err
 }
 
-// applyError is for changes that are saved but could not reach the running
-// interface; the next start or restart picks them up.
+// Saved but not live; the next start or restart picks it up.
 func applyError(err error) error {
 	return httpx.Errorf(http.StatusBadGateway, "apply_failed",
 		"saved, but the running tunnel could not be updated (restart it to apply): %v", err)

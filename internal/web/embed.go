@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-// zeroTime disables the Last-Modified header; an embedded file has no
-// meaningful modification time.
 var zeroTime time.Time
 
 //go:embed all:dist
@@ -24,8 +22,7 @@ Run "make build" to compile it in, or "make dev" to work against the Vite dev
 server instead.
 `
 
-// Handler serves the SPA: real files come from the build output, and every
-// other path falls back to index.html so client-side routes work on reload.
+// Unknown paths fall back to index.html so client routes survive a reload.
 func Handler() http.Handler {
 	dist, err := fs.Sub(distFS, "dist")
 	if err != nil {
@@ -56,8 +53,7 @@ func Handler() http.Handler {
 			return
 		}
 
-		// Vite fingerprints everything under assets/, so it can be cached
-		// indefinitely; index.html must never be.
+		// assets/ is fingerprinted by Vite; index.html must never be cached.
 		if strings.HasPrefix(name, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}

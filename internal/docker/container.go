@@ -12,8 +12,7 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// LabelManaged marks containers Tunploy created. Anything without it belongs
-// to the operator, and every mutating call here refuses to touch it.
+// Mutating calls refuse containers without this label: they are the operator's.
 const LabelManaged = "io.tunploy.managed"
 
 type Port struct {
@@ -129,7 +128,6 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (Container, er
 	return out, nil
 }
 
-// ListContainers returns only managed containers, stopped ones included.
 func (c *Client) ListContainers(ctx context.Context) ([]Container, error) {
 	resp, err := c.api.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
@@ -165,7 +163,6 @@ func (c *Client) StartContainer(ctx context.Context, id string) error {
 	return nil
 }
 
-// StopContainer sends SIGTERM and escalates to SIGKILL after timeout.
 func (c *Client) StopContainer(ctx context.Context, id string, timeout time.Duration) error {
 	if err := c.ensureManaged(ctx, id); err != nil {
 		return err
@@ -177,8 +174,6 @@ func (c *Client) StopContainer(ctx context.Context, id string, timeout time.Dura
 	return nil
 }
 
-// RemoveContainer also removes a running container. Bind-mounted host
-// directories are left in place; they hold the service's configuration.
 func (c *Client) RemoveContainer(ctx context.Context, id string) error {
 	if err := c.ensureManaged(ctx, id); err != nil {
 		return err

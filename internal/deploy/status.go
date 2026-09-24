@@ -26,8 +26,6 @@ type Status struct {
 	Error string `json:"error,omitempty"`
 }
 
-// Statuses answers for every instance with one list call. When Docker is
-// unreachable each instance reports unknown along with the reason.
 func (m *Manager) Statuses(ctx context.Context, instanceIDs []int64) map[int64]Status {
 	out := make(map[int64]Status, len(instanceIDs))
 
@@ -80,9 +78,7 @@ func statusOf(ct docker.Container) Status {
 	return Status{State: StateStopped}
 }
 
-// Reconcile runs at startup. It rewrites every config, recreates containers
-// that are missing or on an outdated image, and removes containers whose
-// instance no longer exists. A stopped container stays stopped.
+// Reconcile leaves stopped containers stopped.
 func (m *Manager) Reconcile(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

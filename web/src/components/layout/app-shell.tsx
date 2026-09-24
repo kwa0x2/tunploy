@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
-import { LayoutDashboard, LogOut, Menu, Server, Settings, Users } from "lucide-react"
+import { History, LayoutDashboard, LogOut, Menu, Server, Settings, Users } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,6 +22,7 @@ const navigation = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/servers", label: "Servers", icon: Server, end: false },
   { to: "/peers", label: "Peers", icon: Users, end: false },
+  { to: "/activity", label: "Activity", icon: History, end: false },
   { to: "/settings", label: "Settings", icon: Settings, end: false },
 ]
 

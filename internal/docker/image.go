@@ -15,8 +15,6 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// EnsureImage pulls ref only when it is not already present, so starting a
-// service never depends on the registry being reachable once it has run.
 func (c *Client) EnsureImage(ctx context.Context, ref string) error {
 	ok, err := c.ImageExists(ctx, ref)
 	if err != nil || ok {
@@ -36,7 +34,6 @@ func (c *Client) ImageExists(ctx context.Context, ref string) (bool, error) {
 	return false, err
 }
 
-// BuildImage builds tag from an in-memory context of file name to contents.
 func (c *Client) BuildImage(ctx context.Context, tag string, files map[string][]byte) error {
 	slog.Info("building image", "image", tag)
 
@@ -98,8 +95,7 @@ func (c *Client) PullImage(ctx context.Context, ref string) error {
 	if err != nil {
 		return wrap(err, "pull image")
 	}
-	// The HTTP call succeeds as soon as the stream opens; registry failures
-	// such as a missing tag only show up inside it, which Wait surfaces.
+	// Registry failures such as a missing tag only show up inside the stream.
 	if err := resp.Wait(ctx); err != nil {
 		return wrap(err, "pull image "+ref)
 	}

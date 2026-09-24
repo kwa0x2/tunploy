@@ -68,7 +68,6 @@ export function DeployProgress({ state, port }: { state: DeployState; port?: num
   )
 }
 
-// Stays dark in both themes so it reads as terminal output.
 function ErrorConsole({ error }: { error: unknown }) {
   const code = error instanceof ApiError ? error.code : "unknown_error"
   const message = error instanceof ApiError ? error.message : "Something went wrong."

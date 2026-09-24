@@ -10,8 +10,7 @@ import (
 
 const tokenBytes = 32
 
-// NewSessionToken returns the secret handed to the client and the hash stored
-// in the database, so a database leak cannot be replayed as a login.
+// Only the hash is stored, so a database leak can't be replayed as a login.
 func NewSessionToken() (token, hash string, err error) {
 	raw := make([]byte, tokenBytes)
 	if _, err := rand.Read(raw); err != nil {

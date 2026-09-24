@@ -8,8 +8,6 @@ import { useAuth } from "@/lib/auth"
 
 const command = "docker exec -it tunploy tunploy admin create"
 
-// Shown instead of a sign-up form: the admin is created on the server, so a
-// stranger who finds the panel first cannot claim it.
 export function AdminMissingPage() {
   const { recheck } = useAuth()
   const [checking, setChecking] = useState(false)

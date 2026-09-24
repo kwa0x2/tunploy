@@ -121,6 +121,7 @@ docker exec -it tunploy tunploy admin create
 | `TUNPLOY_PUBLIC_HOST` | empty | Default endpoint for new servers, used while **Settings → Public host** is empty. |
 | `TUNPLOY_SESSION_TTL` | `168h` | How long a sign-in lasts. |
 | `TUNPLOY_SECURE_COOKIES` | `false` | Set to `true` when the panel is served over HTTPS. |
+| `TUNPLOY_GEOIP` | `true` | Show device countries. Downloads the free [DB-IP Lite](https://db-ip.com) database (about 8 MB) into the data dir and refreshes it monthly. Set to `false` to never contact db-ip.com. |
 | `TUNPLOY_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 
 ## Troubleshooting

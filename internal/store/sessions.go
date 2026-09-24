@@ -26,8 +26,6 @@ func (s *Store) CreateSession(ctx context.Context, tokenHash string, userID int6
 	return nil
 }
 
-// UserBySessionToken resolves a session hash to its user, treating an expired
-// session as absent.
 func (s *Store) UserBySessionToken(ctx context.Context, tokenHash string) (*User, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT u.id, u.name, u.email, u.password_hash, u.created_at, u.updated_at

@@ -10,8 +10,7 @@ import (
 	"unicode"
 )
 
-// ServerConfig renders the wg-quick config for the instance. Disabled peers
-// are left out, which is how disabling cuts a client off.
+// Disabled peers are left out, which is how disabling cuts a client off.
 func ServerConfig(in Instance, peers []Peer) []byte {
 	var b bytes.Buffer
 
@@ -19,8 +18,7 @@ func ServerConfig(in Instance, peers []Peer) []byte {
 	field(&b, "PrivateKey", in.PrivateKey.String())
 	field(&b, "Address", in.Address.String())
 	field(&b, "ListenPort", strconv.Itoa(in.ListenPort))
-	// Left to itself wg-quick derives the MTU from the container's eth0,
-	// which is 65535 on some Docker setups and would fragment every packet.
+	// wg-quick would take eth0's MTU, 65535 on some Docker setups.
 	mtu := in.MTU
 	if mtu == 0 {
 		mtu = DefaultMTU
@@ -42,7 +40,6 @@ func ServerConfig(in Instance, peers []Peer) []byte {
 	return b.Bytes()
 }
 
-// ClientConfig renders the file a peer imports into its WireGuard app.
 func ClientConfig(in Instance, p Peer) []byte {
 	var b bytes.Buffer
 
@@ -80,8 +77,7 @@ func join[T fmt.Stringer](items []T) string {
 	return strings.Join(parts, ", ")
 }
 
-// commentSafe backs up Validate: config files run as root, so a name must
-// never be able to end its comment line.
+// Configs run as root, so a name must never end its comment line.
 func commentSafe(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

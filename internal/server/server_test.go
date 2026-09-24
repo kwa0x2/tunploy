@@ -41,7 +41,7 @@ func newTestServerWithDeploy(t *testing.T, dk Docker, fk *dockertest.Fake) (*Ser
 		t.Fatalf("new deploy manager: %v", err)
 	}
 	cfg := config.Config{SessionTTL: time.Hour, PublicHost: "vpn.example.com"}
-	return New(cfg, st, dk, mgr), mgr
+	return New(cfg, st, dk, mgr, nil), mgr
 }
 
 func do(t *testing.T, s *Server, method, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {

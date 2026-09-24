@@ -30,8 +30,6 @@ func newUserResponse(u *store.User) userResponse {
 	return userResponse{ID: u.ID, Name: u.Name, Email: u.Email, CreatedAt: u.CreatedAt}
 }
 
-// handleSetupStatus lets the UI explain that the admin account is created
-// on the server, since the panel itself never offers a sign-up form.
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) error {
 	n, err := s.store.CountUsers(r.Context())
 	if err != nil {
@@ -57,10 +55,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	user, err := s.store.UserByEmail(r.Context(), email)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			// Spend the same work as a real check so timing does not reveal
-			// whether the account exists.
+			// Same work as a real check, so timing can't reveal the account.
 			auth.VerifyPassword(auth.DummyHash, req.Password)
 			s.loginThrottle.Fail(key)
+			s.record(r.Context(), store.Event{Kind: "auth.login_failed", IP: clientIP(r), Detail: email})
 			return httpx.Unauthorized("email or password is incorrect")
 		}
 		return err
@@ -69,6 +67,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	if err := auth.VerifyPassword(user.PasswordHash, req.Password); err != nil {
 		if errors.Is(err, auth.ErrPasswordMismatch) {
 			s.loginThrottle.Fail(key)
+			s.record(r.Context(), store.Event{Kind: "auth.login_failed", IP: clientIP(r), Detail: email})
 			return httpx.Unauthorized("email or password is incorrect")
 		}
 		return err
@@ -78,6 +77,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	if err := s.startSession(w, r, user); err != nil {
 		return err
 	}
+	s.record(r.Context(), store.Event{Kind: "auth.login", IP: clientIP(r)})
 	return httpx.JSON(w, http.StatusOK, newUserResponse(user))
 }
 
@@ -108,8 +108,7 @@ type passwordChange struct {
 	NewPassword     string `json:"new_password"`
 }
 
-// handleChangePassword signs out every other session and hands this one a
-// fresh token, so a stolen cookie dies with the old password.
+// A fresh token, so a stolen cookie dies with the old password.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) error {
 	id, ok := auth.IdentityFrom(r.Context())
 	if !ok {
@@ -123,8 +122,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 		return httpx.Invalid(map[string]string{"new_password": msg})
 	}
 
-	// Shares the login budget: a hijacked session must not become an
-	// unthrottled way to guess the password.
+	// Shares the login budget so a hijacked session can't guess freely.
 	key := id.Email + "|" + clientIP(r)
 	if ok, retryIn := s.loginThrottle.Allowed(key); !ok {
 		w.Header().Set("Retry-After", retryAfterSeconds(retryIn))
@@ -158,6 +156,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 	if err := s.startSession(w, r, user); err != nil {
 		return err
 	}
+	s.record(r.Context(), store.Event{Kind: "auth.password_changed", IP: clientIP(r)})
 	return httpx.NoContent(w)
 }
 
@@ -198,8 +197,6 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 	})
 }
 
-// requireAuth rejects requests without a live session and attaches the caller
-// to the request context.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(sessionCookie)

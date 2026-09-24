@@ -37,8 +37,6 @@ func HashPassword(password string) (string, error) {
 		b64.EncodeToString(salt), b64.EncodeToString(key)), nil
 }
 
-// VerifyPassword returns ErrPasswordMismatch when the password is wrong, and
-// a different error when the stored hash itself is unusable.
 func VerifyPassword(encoded, password string) error {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
@@ -77,8 +75,7 @@ func VerifyPassword(encoded, password string) error {
 	return nil
 }
 
-// DummyHash is verified against when no user matches, so a failed login costs
-// the same time whether or not the account exists.
+// Verified when no user matches, so timing can't reveal the account.
 var DummyHash = mustHash("tunploy-timing-equaliser")
 
 func mustHash(password string) string {

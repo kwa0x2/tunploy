@@ -35,7 +35,6 @@ export function LogsDialog({ instanceId, name, open, onOpenChange }: Props) {
             Output of the WireGuard container, newest at the bottom.
           </DialogDescription>
         </DialogHeader>
-        {/* Keyed so a reconnect starts from an empty, fresh stream. */}
         <LogStream key={attempt} instanceId={instanceId} onReconnect={() => setAttempt((a) => a + 1)} />
       </DialogContent>
     </Dialog>
@@ -94,8 +93,7 @@ function LogStream({ instanceId, onReconnect }: { instanceId: number; onReconnec
     return () => ctrl.abort()
   }, [instanceId])
 
-  // Follow new output only while the reader is at the bottom, so scrolling
-  // up to read something is not yanked away by the next line.
+  // Follow only while at the bottom, so scrolling up to read isn't yanked away.
   useLayoutEffect(() => {
     const el = box.current
     if (el && pinned.current) el.scrollTop = el.scrollHeight
@@ -164,8 +162,7 @@ function LogStream({ instanceId, onReconnect }: { instanceId: number; onReconnec
   )
 }
 
-// Docker prefixes each line with an RFC 3339 timestamp in nanoseconds; Date
-// only takes milliseconds.
+// Docker timestamps are in nanoseconds; Date takes milliseconds.
 function parseLine(id: number, raw: string): Line {
   const space = raw.indexOf(" ")
   if (space > 0) {

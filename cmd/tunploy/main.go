@@ -9,18 +9,25 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/geoip"
 	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
 // version is stamped at build time with -ldflags.
 var version = "dev"
+
+const (
+	peerWatchInterval = 10 * time.Second
+	eventRetention    = 90 * 24 * time.Hour
+)
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "admin" {
@@ -63,12 +70,20 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	var geo *geoip.DB
+	if cfg.GeoIP {
+		geo = geoip.Open(filepath.Join(cfg.DataDir, "geoip"))
+		go geo.Run(ctx)
+	}
+
+	handler := server.New(cfg, st, dk, mgr, geo)
+
 	if logDockerStatus(ctx, dk) {
 		go reconcile(ctx, mgr)
 	}
-	go purgeExpiredSessions(ctx, st)
+	go mgr.Watch(ctx, peerWatchInterval)
+	go housekeeping(ctx, st)
 
-	handler := server.New(cfg, st, dk, mgr)
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           handler,
@@ -101,8 +116,7 @@ func run() error {
 	return nil
 }
 
-// A missing daemon is not fatal: the panel still has to come up so the
-// admin can see what is wrong and fix it from there.
+// Not fatal: the panel must come up to show what is wrong.
 func logDockerStatus(ctx context.Context, dk *docker.Client) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -116,8 +130,6 @@ func logDockerStatus(ctx context.Context, dk *docker.Client) bool {
 	return true
 }
 
-// reconcile runs beside the HTTP server because a first run may build the
-// WireGuard image, and the panel should not wait on that to come up.
 func reconcile(ctx context.Context, mgr *deploy.Manager) {
 	if err := mgr.Reconcile(ctx); err != nil {
 		slog.Error("reconcile wireguard containers", "error", err)
@@ -126,7 +138,7 @@ func reconcile(ctx context.Context, mgr *deploy.Manager) {
 	slog.Info("wireguard containers reconciled")
 }
 
-func purgeExpiredSessions(ctx context.Context, st *store.Store) {
+func housekeeping(ctx context.Context, st *store.Store) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 
@@ -135,14 +147,16 @@ func purgeExpiredSessions(ctx context.Context, st *store.Store) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			n, err := st.DeleteExpiredSessions(ctx)
-			if err != nil {
-				slog.Error("purge expired sessions", "error", err)
-				continue
-			}
-			if n > 0 {
-				slog.Info("purged expired sessions", "count", n)
-			}
+		}
+		if n, err := st.DeleteExpiredSessions(ctx); err != nil {
+			slog.Error("purge expired sessions", "error", err)
+		} else if n > 0 {
+			slog.Info("purged expired sessions", "count", n)
+		}
+		if n, err := st.DeleteEventsBefore(ctx, time.Now().Add(-eventRetention)); err != nil {
+			slog.Error("purge old events", "error", err)
+		} else if n > 0 {
+			slog.Info("purged old events", "count", n)
 		}
 	}
 }

@@ -5,8 +5,7 @@ import (
 	"time"
 )
 
-// Throttle limits failed login attempts per key. A panel reachable from the
-// internet needs this; it is in-memory because a single node runs one panel.
+// In-memory: a single node runs one panel.
 type Throttle struct {
 	max    int
 	window time.Duration
@@ -24,8 +23,6 @@ func NewThrottle(max int, window time.Duration) *Throttle {
 	return &Throttle{max: max, window: window, entries: map[string]*throttleEntry{}}
 }
 
-// Allowed reports whether key may attempt a login, and how long it must wait
-// otherwise.
 func (t *Throttle) Allowed(key string) (bool, time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

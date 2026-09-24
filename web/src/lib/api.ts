@@ -18,8 +18,7 @@ export class ApiError extends Error {
   }
 }
 
-// DeployError is a create that passed validation but did not come up. log
-// is the container's last output, which is gone once the server rolls back.
+// log is the container's last output, gone once the server rolls back.
 export class DeployError extends ApiError {
   readonly log: string[]
 
@@ -97,6 +96,22 @@ export interface Peer {
   created_at: string
   updated_at: string
   stats?: PeerStats
+  country?: string
+}
+
+export type EventCategory = "connection" | "change" | "auth"
+
+export interface ActivityEvent {
+  id: number
+  created_at: string
+  kind: string
+  instance_id?: number
+  instance_name?: string
+  peer_id?: number
+  peer_name?: string
+  ip?: string
+  country?: string
+  detail?: string
 }
 
 export interface DockerStatus {
@@ -198,8 +213,6 @@ async function fetchRaw(path: string, init?: RequestInit): Promise<Response> {
 
 const fetchText = async (path: string) => (await fetchRaw(path)).text()
 
-// streamText calls onChunk with decoded text until the server closes the
-// stream or the request's signal aborts.
 async function streamText(path: string, onChunk: (text: string) => void, init?: RequestInit) {
   const res = await fetchRaw(path, init)
   if (!res.body) return
@@ -211,8 +224,6 @@ async function streamText(path: string, onChunk: (text: string) => void, init?: 
   }
 }
 
-// provisionInstance creates a server, reporting each deploy step as the
-// backend finishes it. Validation errors still arrive as a plain ApiError.
 async function provisionInstance(
   input: InstanceInput,
   onStep: (step: ProvisionStep) => void,
@@ -271,6 +282,10 @@ export const api = {
   updateSettings: (input: SettingsInput) => patch<Settings>("/api/settings", input),
 
   dockerStatus: () => request<DockerStatus>("/api/system/docker"),
+  events: (opts: { limit: number; category?: EventCategory }) =>
+    request<ActivityEvent[]>(
+      `/api/events?limit=${opts.limit}${opts.category ? `&category=${opts.category}` : ""}`,
+    ),
 
   instances: () => request<Instance[]>("/api/instances"),
   instanceDefaults: () => request<InstanceSettings>("/api/instances/defaults"),

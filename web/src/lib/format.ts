@@ -23,9 +23,29 @@ export function formatRelative(iso: string, now = Date.now()): string {
   return `${Math.round(hours / 24)}d ago`
 }
 
-// The server decides, since it can watch the traffic counters between polls.
 export function isOnline(peer: Peer): boolean {
   return peer.stats?.online ?? false
+}
+
+const regionNames = new Intl.DisplayNames(["en"], { type: "region" })
+
+export function countryName(code: string): string {
+  try {
+    return regionNames.of(code) ?? code
+  } catch {
+    return code
+  }
+}
+
+export function countryFlag(code: string): string {
+  if (!/^[A-Z]{2}$/.test(code)) return ""
+  return String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65))
+}
+
+export function endpointHost(endpoint: string): string {
+  const v6 = endpoint.match(/^\[(.+)\]:\d+$/)
+  if (v6) return v6[1].replace(/^::ffff:/, "")
+  return endpoint.replace(/:\d+$/, "")
 }
 
 export function endpointOf(instance: Instance): string {

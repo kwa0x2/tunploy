@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kwa0x2/tunploy/internal/httpx"
+	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
 
@@ -17,8 +18,7 @@ const (
 	maxDNSServers = 8
 )
 
-// panelSettings are the defaults new servers start from. Existing servers
-// keep their own copy, so changing these never touches a live tunnel.
+// Existing servers keep their own copy, so changes never touch a live tunnel.
 type panelSettings struct {
 	PublicHost string       `json:"public_host"`
 	DefaultDNS []netip.Addr `json:"default_dns"`
@@ -26,8 +26,7 @@ type panelSettings struct {
 
 type settingsResponse struct {
 	panelSettings
-	// PublicHostEnv is TUNPLOY_PUBLIC_HOST, which applies while PublicHost
-	// is empty.
+	// Applies while PublicHost is empty.
 	PublicHostEnv string `json:"public_host_env"`
 }
 
@@ -55,8 +54,6 @@ func (s *Server) settings(ctx context.Context) (panelSettings, error) {
 	return out, nil
 }
 
-// publicHost is the endpoint new servers get: the panel setting, or the
-// environment when the admin has not set one.
 func (p panelSettings) publicHost(env string) string {
 	if p.PublicHost != "" {
 		return p.PublicHost
@@ -105,6 +102,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) er
 	if err := s.store.SaveSettings(r.Context(), values); err != nil {
 		return err
 	}
+	s.record(r.Context(), store.Event{Kind: "settings.updated"})
 	return s.handleGetSettings(w, r)
 }
 

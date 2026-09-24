@@ -15,7 +15,7 @@ import type { Instance } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { loadFleet } from "@/lib/fleet"
 import type { Fleet } from "@/lib/fleet"
-import { endpointOf, formatBytes, formatRelative, isOnline } from "@/lib/format"
+import { countryFlag, countryName, endpointOf, formatBytes, formatRelative, isOnline } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 type FleetPeer = Fleet["peers"][number]
@@ -47,7 +47,6 @@ export function OverviewPage() {
             ? "Let's get your first VPN server running."
             : `${running.length} of ${data.instances.length} ${plural(data.instances.length, "server")} running · ${online.length} ${plural(online.length, "device")} online right now.`)
         }
-        // The getting-started card has its own button; one is enough.
         onCreate={data?.instances.length ? () => setCreating(true) : undefined}
       />
 
@@ -313,7 +312,14 @@ function RecentCard({ peers, now }: { peers: FleetPeer[]; now: number }) {
                   <DeviceIcon className="size-8" />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{peer.name}</p>
-                    <p className="text-muted-foreground truncate text-xs">{peer.instance.name}</p>
+                    <p className="text-muted-foreground flex min-w-0 items-center gap-1.5 truncate text-xs">
+                      {peer.instance.name}
+                      {peer.country && (
+                        <span title={countryName(peer.country)}>
+                          · {countryFlag(peer.country)} {countryName(peer.country)}
+                        </span>
+                      )}
+                    </p>
                   </div>
                 </div>
                 <PeerStatus

@@ -55,9 +55,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         setThemeState(next)
         try {
           localStorage.setItem(STORAGE_KEY, next)
-        } catch {
-          // Preference simply will not persist.
-        }
+        } catch {}
       },
     }),
     [theme, resolved],

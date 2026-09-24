@@ -17,9 +17,6 @@ const (
 	maxLogTail     = 5000
 )
 
-// handleInstanceLogs streams plain text rather than JSON so the browser can
-// render lines as they arrive. With follow=1 it stays open until the
-// container stops, the client leaves or the panel shuts down.
 func (s *Server) handleInstanceLogs(w http.ResponseWriter, r *http.Request) error {
 	in, err := s.instanceFromPath(r)
 	if err != nil {
@@ -37,8 +34,7 @@ func (s *Server) handleInstanceLogs(w http.ResponseWriter, r *http.Request) erro
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	// http.Server.Shutdown waits for open requests, and a followed stream
-	// would otherwise hold it for the full timeout.
+	// Shutdown waits for open requests; a followed stream would hold it.
 	defer context.AfterFunc(s.closing, cancel)()
 
 	logs, err := s.deploy.Logs(ctx, in.ID, tail, follow)

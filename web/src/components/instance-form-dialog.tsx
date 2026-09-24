@@ -105,8 +105,7 @@ function InstanceForm(
       .instanceDefaults()
       .then((d) => {
         setDefaults(d)
-        // Without TUNPLOY_PUBLIC_HOST the server can't know its public name,
-        // but the host the admin reached the panel through usually is it.
+        // The host the admin reached the panel through is usually the public one.
         if (!d.endpoint) setValues((v) => ({ ...v, endpoint: window.location.hostname }))
       })
       .catch(() => {})
@@ -164,7 +163,6 @@ function InstanceForm(
         setDeploy((d) => d && { ...d, done: [...d.done, step] }),
       )
       setDeploy((d) => ({ status: "ready", done: d?.done ?? [] }))
-      // Long enough to see the last step tick before the page moves on.
       setTimeout(() => {
         setBusy(false)
         onSaved(saved)

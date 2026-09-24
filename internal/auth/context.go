@@ -4,7 +4,6 @@ import "context"
 
 type ctxKey struct{}
 
-// Identity is the authenticated caller attached to a request context.
 type Identity struct {
 	UserID    int64
 	Email     string

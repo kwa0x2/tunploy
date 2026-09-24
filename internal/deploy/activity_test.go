@@ -49,3 +49,30 @@ func TestActivityWithoutKeepalive(t *testing.T) {
 		}
 	}
 }
+
+func TestActivityReportsChanges(t *testing.T) {
+	key := wg.GeneratePrivateKey().PublicKey()
+	start := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	handshake := start.Add(-time.Hour)
+
+	a := activity{peers: map[int64]map[wg.Key]sample{}}
+	step := func(at time.Duration, rx int64) []PeerChange {
+		stats := map[wg.Key]wg.PeerStats{key: {RxBytes: rx, LatestHandshake: &handshake, Endpoint: "203.0.113.7:4000"}}
+		return a.observe(1, stats, 25, start.Add(at))
+	}
+
+	if got := step(0, 100); len(got) != 0 {
+		t.Fatalf("first look should not be a change: %+v", got)
+	}
+	got := step(10*time.Second, 200)
+	if len(got) != 1 || !got[0].Online || got[0].Endpoint != "203.0.113.7:4000" {
+		t.Fatalf("want a connect, got %+v", got)
+	}
+	if got := step(20*time.Second, 300); len(got) != 0 {
+		t.Fatalf("still online is not a change: %+v", got)
+	}
+	got = step(2*time.Minute, 300)
+	if len(got) != 1 || got[0].Online || !got[0].OnlineSince.Equal(start.Add(10*time.Second)) {
+		t.Fatalf("want a disconnect with when it came online, got %+v", got)
+	}
+}

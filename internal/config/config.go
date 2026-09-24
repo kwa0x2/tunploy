@@ -18,13 +18,12 @@ type Config struct {
 	PublicHost    string
 	SessionTTL    time.Duration
 	SecureCookies bool
+	GeoIP         bool
 	LogLevel      slog.Level
 }
 
 func (c Config) DBPath() string { return filepath.Join(c.DataDir, "tunploy.db") }
 
-// Load applies defaults and fails only on values that are present but
-// unusable, so a bare `docker run` works out of the box.
 func Load() (Config, error) {
 	cfg := Config{
 		Listen:        env("TUNPLOY_LISTEN", ":3000"),
@@ -33,6 +32,7 @@ func Load() (Config, error) {
 		PublicHost:    env("TUNPLOY_PUBLIC_HOST", ""),
 		SessionTTL:    7 * 24 * time.Hour,
 		SecureCookies: false,
+		GeoIP:         true,
 	}
 
 	if raw := env("TUNPLOY_SESSION_TTL", ""); raw != "" {
@@ -52,6 +52,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("TUNPLOY_SECURE_COOKIES: %w", err)
 		}
 		cfg.SecureCookies = b
+	}
+
+	if raw := env("TUNPLOY_GEOIP", ""); raw != "" {
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("TUNPLOY_GEOIP: %w", err)
+		}
+		cfg.GeoIP = b
 	}
 
 	lvl, err := parseLevel(env("TUNPLOY_LOG_LEVEL", "info"))

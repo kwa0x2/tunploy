@@ -5,8 +5,6 @@ import (
 	"fmt"
 )
 
-// Settings returns every stored panel setting. Keys that were never set are
-// absent, so callers fall back to their own defaults.
 func (s *Store) Settings(ctx context.Context) (map[string]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM settings`)
 	if err != nil {
@@ -25,7 +23,6 @@ func (s *Store) Settings(ctx context.Context) (map[string]string, error) {
 	return out, rows.Err()
 }
 
-// SaveSettings upserts all values in one transaction.
 func (s *Store) SaveSettings(ctx context.Context, values map[string]string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

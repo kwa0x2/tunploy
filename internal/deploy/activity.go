@@ -7,41 +7,46 @@ import (
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
 
-// WireGuard renews the handshake every two minutes on a live tunnel, so an
-// older one means the peer has gone quiet.
+// WireGuard renews the handshake every two minutes on a live tunnel.
 const handshakeWindow = 3 * time.Minute
 
-// activity decides which peers are online. The handshake alone keeps a
-// device that just left looking online for minutes; a client with a
-// keepalive sends at least that often, so a received-bytes counter that
-// stops growing gives it away much sooner.
+// A keepalive client's rx stops growing long before its handshake ages out.
 type activity struct {
 	mu    sync.Mutex
 	peers map[int64]map[wg.Key]sample
 }
 
 type sample struct {
-	rx int64
-	// since is when rx was first seen at this value, and seen the latest
-	// observation.
+	rx          int64
 	since, seen time.Time
-	// grew is set when since is the moment rx was watched growing rather
-	// than just the first time the peer was looked at.
+	// grew: since is when rx was seen growing, not just first observed.
 	grew bool
+
+	online      bool
+	onlineSince time.Time
 }
 
-// observe fills in Online on stats. It only knows as much as it is asked,
-// which the panel does every few seconds while someone is looking.
-func (a *activity) observe(instanceID int64, stats map[wg.Key]wg.PeerStats, keepalive int, now time.Time) {
+type PeerChange struct {
+	InstanceID  int64
+	Key         wg.Key
+	Online      bool
+	Endpoint    string
+	OnlineSince time.Time
+}
+
+// A first observation is never a change, so a panel restart logs nothing.
+func (a *activity) observe(instanceID int64, stats map[wg.Key]wg.PeerStats, keepalive int, now time.Time) []PeerChange {
 	window := time.Duration(2*keepalive)*time.Second + 10*time.Second
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	var changes []PeerChange
 	prev := a.peers[instanceID]
 	next := make(map[wg.Key]sample, len(stats))
 	for key, st := range stats {
-		s, ok := prev[key]
+		old, ok := prev[key]
+		s := old
 		switch {
 		case !ok || st.RxBytes < s.rx:
 			// New peer, or counters reset by a container restart.
@@ -50,12 +55,27 @@ func (a *activity) observe(instanceID int64, stats map[wg.Key]wg.PeerStats, keep
 			s = sample{rx: st.RxBytes, since: now, grew: now.Sub(s.seen) <= window}
 		}
 		s.seen = now
-		next[key] = s
-
 		st.Online = online(st, s, keepalive, window, now)
 		stats[key] = st
+
+		s.online, s.onlineSince = st.Online, old.onlineSince
+		if st.Online && (!ok || !old.online) {
+			s.onlineSince = now
+		}
+		next[key] = s
+
+		if ok && st.Online != old.online {
+			changes = append(changes, PeerChange{
+				InstanceID:  instanceID,
+				Key:         key,
+				Online:      st.Online,
+				Endpoint:    st.Endpoint,
+				OnlineSince: s.onlineSince,
+			})
+		}
 	}
 	a.peers[instanceID] = next
+	return changes
 }
 
 func online(st wg.PeerStats, s sample, keepalive int, window time.Duration, now time.Time) bool {
@@ -65,7 +85,6 @@ func online(st wg.PeerStats, s sample, keepalive int, window time.Duration, now 
 		// An idle client sends nothing, so silence proves nothing.
 		return recent
 	case now.Sub(s.since) >= window:
-		// Watched for longer than a keepalive takes and nothing arrived.
 		return false
 	case s.grew:
 		return true

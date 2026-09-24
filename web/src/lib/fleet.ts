@@ -6,8 +6,6 @@ export interface Fleet {
   peers: (Peer & { instance: Instance })[]
 }
 
-// loadFleet gathers every peer on the node. The API is per instance, which
-// is fine at the handful of servers a single node runs.
 export async function loadFleet(): Promise<Fleet> {
   const instances = await api.instances()
   const lists = await Promise.all(instances.map((i) => api.peers(i.id)))

@@ -8,8 +8,6 @@ import (
 
 var ErrSubnetFull = errors.New("wg: no free addresses left in the subnet")
 
-// NextAddress returns the lowest host address in subnet that is not in used,
-// so addresses freed by deleted peers are handed out again first.
 func NextAddress(subnet netip.Prefix, used []netip.Addr) (netip.Addr, error) {
 	first, last, ok := hostRange(subnet)
 	if !ok {
@@ -29,7 +27,6 @@ func NextAddress(subnet netip.Prefix, used []netip.Addr) (netip.Addr, error) {
 	return netip.Addr{}, ErrSubnetFull
 }
 
-// hostRange bounds the usable IPv4 hosts, excluding network and broadcast.
 func hostRange(subnet netip.Prefix) (first, last uint32, ok bool) {
 	if !subnet.IsValid() || !subnet.Addr().Is4() || subnet.Bits() > 30 {
 		return 0, 0, false

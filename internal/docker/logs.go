@@ -9,9 +9,7 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Logs streams a managed container's stdout and stderr merged into one, each
-// line prefixed with an RFC 3339 timestamp. With follow it stays open until
-// the container stops, ctx ends or the caller closes it.
+// Lines are prefixed with an RFC 3339 timestamp.
 func (c *Client) Logs(ctx context.Context, id string, tail int, follow bool) (io.ReadCloser, error) {
 	if err := c.ensureManaged(ctx, id); err != nil {
 		return nil, err
@@ -35,8 +33,7 @@ func (c *Client) Logs(ctx context.Context, id string, tail int, follow bool) (io
 	return logStream{PipeReader: pr, raw: raw}, nil
 }
 
-// logStream closes the daemon's stream too, which is what unblocks the
-// demultiplexing goroutine while it waits on a quiet container.
+// Closing the daemon's stream is what unblocks the demux goroutine.
 type logStream struct {
 	*io.PipeReader
 	raw io.Closer

@@ -1,5 +1,4 @@
-// Package docker is the narrow slice of the Docker Engine API that Tunploy
-// needs to run VPN services as containers.
+// Package docker is the slice of the Docker Engine API Tunploy needs.
 package docker
 
 import (
@@ -22,8 +21,7 @@ type Client struct {
 	api *client.Client
 }
 
-// New does not dial; an unreachable daemon only surfaces on the first call.
-// An empty host falls back to DOCKER_HOST, then the local socket.
+// New does not dial; an unreachable daemon surfaces on the first call.
 func New(host string) (*Client, error) {
 	opts := []client.Opt{client.FromEnv}
 	if host != "" {
@@ -61,8 +59,7 @@ func (c *Client) Ping(ctx context.Context) (Info, error) {
 	}, nil
 }
 
-// wrap keeps the daemon's message but makes the failure class matchable
-// with errors.Is, so callers never import containerd's errdefs.
+// Matchable with errors.Is, so callers never import containerd's errdefs.
 func wrap(err error, op string) error {
 	var kind error
 	switch {

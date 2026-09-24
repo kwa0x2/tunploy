@@ -39,8 +39,7 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-// Unwrap lets http.ResponseController reach the real writer, which streaming
-// endpoints need for flushing.
+// Unwrap lets ResponseController reach the real writer to flush streams.
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func logRequests(next http.Handler) http.Handler {

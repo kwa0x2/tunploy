@@ -8,13 +8,11 @@ import (
 	"errors"
 )
 
-// Key is a Curve25519 key in the raw 32-byte form WireGuard uses.
 type Key [32]byte
 
 var ErrInvalidKey = errors.New("wg: key must be 32 bytes encoded as base64")
 
-// GeneratePrivateKey clamps the scalar the way `wg genkey` does, so exported
-// keys are byte-for-byte what other WireGuard tools produce.
+// Clamped like `wg genkey`, so keys match other WireGuard tools byte for byte.
 func GeneratePrivateKey() Key {
 	var k Key
 	rand.Read(k[:])

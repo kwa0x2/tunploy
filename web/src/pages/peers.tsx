@@ -11,11 +11,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { PageHeader } from "@/components/page-header"
-import { DeviceIcon, PeerStatus, PeerTraffic } from "@/components/status"
+import { DeviceIcon, GeoAttribution, Location, PeerStatus, PeerTraffic } from "@/components/status"
 import { useNow } from "@/hooks/use-now"
 import { useResource } from "@/hooks/use-resource"
 import { loadFleet } from "@/lib/fleet"
-import { errorMessage, formatRelative, isOnline } from "@/lib/format"
+import { endpointHost, errorMessage, formatRelative, isOnline } from "@/lib/format"
 
 export function PeersPage() {
   const { data, error } = useResource(loadFleet, 10_000)
@@ -57,6 +57,7 @@ export function PeersPage() {
                     <TableHead>Server</TableHead>
                     <TableHead>Address</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Location</TableHead>
                     <TableHead>Traffic</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -88,6 +89,12 @@ export function PeersPage() {
                           />
                         </TableCell>
                         <TableCell>
+                          <Location
+                            ip={peer.stats?.endpoint && endpointHost(peer.stats.endpoint)}
+                            country={peer.country}
+                          />
+                        </TableCell>
+                        <TableCell>
                           <PeerTraffic stats={peer.stats} />
                         </TableCell>
                       </TableRow>
@@ -99,6 +106,7 @@ export function PeersPage() {
           </CardContent>
         </Card>
       )}
+      {data && data.peers.length > 0 && <GeoAttribution className="mt-4" />}
     </>
   )
 }

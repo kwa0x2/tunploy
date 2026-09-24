@@ -12,12 +12,10 @@ type PeerStats struct {
 	LatestHandshake *time.Time `json:"latest_handshake,omitempty"`
 	RxBytes         int64      `json:"rx_bytes"`
 	TxBytes         int64      `json:"tx_bytes"`
-	// Online is left for the caller, which can watch the counters over time.
+	// Set by the caller, which can watch the counters over time.
 	Online bool `json:"online"`
 }
 
-// ParseDump reads `wg show <iface> dump`: an interface line, then one
-// tab-separated line per peer.
 func ParseDump(out []byte) (map[Key]PeerStats, error) {
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	stats := make(map[Key]PeerStats, max(len(lines)-1, 0))

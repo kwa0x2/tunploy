@@ -33,8 +33,7 @@ stdin when it is piped in. Run it inside the container:
 
 var errAdminExists = errors.New("an admin account already exists; use 'tunploy admin reset-password' to change its password")
 
-// runAdmin is the only way to create the admin: a sign-up page on a fresh,
-// internet-facing panel would belong to whoever opened it first.
+// No sign-up page: on a fresh public panel it would belong to whoever came first.
 func runAdmin(args []string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprint(os.Stderr, adminUsage)
@@ -219,8 +218,7 @@ func (p *prompter) line(label string) (string, error) {
 	return strings.TrimSpace(s), nil
 }
 
-// newPassword asks twice on a terminal. Piped in, it takes the first line
-// as is, so scripts never put the password in argv where ps can see it.
+// Read from stdin, never argv, where ps could see it.
 func (p *prompter) newPassword() (string, error) {
 	if !p.terminal {
 		s, err := p.in.ReadString('\n')

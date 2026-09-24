@@ -1,6 +1,6 @@
 import { Smartphone } from "lucide-react"
 import type { InstanceState, PeerStats } from "@/lib/api"
-import { formatBytes } from "@/lib/format"
+import { countryFlag, countryName, formatBytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const states: Record<InstanceState, { label: string; tone: string; dot: string }> = {
@@ -68,8 +68,7 @@ export function PeerStatus({ online, enabled, lastSeen }: {
   )
 }
 
-// Traffic is shown from the device's side: what it downloaded is what the
-// server sent it.
+// Shown from the device's side: its download is what the server sent.
 export function PeerTraffic({ stats }: { stats?: PeerStats }) {
   if (!stats) return <span className="text-muted-foreground">—</span>
   return (
@@ -78,6 +77,34 @@ export function PeerTraffic({ stats }: { stats?: PeerStats }) {
       <span className="text-muted-foreground mx-1.5">·</span>
       <span title="Uploaded by the device">↑ {formatBytes(stats.rx_bytes)}</span>
     </span>
+  )
+}
+
+export function Location({ ip, country, className }: { ip?: string; country?: string; className?: string }) {
+  if (!ip) return <span className="text-muted-foreground">—</span>
+  return (
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-xs", className)}>
+      {country && (
+        <span title={countryName(country)} aria-label={countryName(country)}>
+          {countryFlag(country)}
+        </span>
+      )}
+      <span className="min-w-0 truncate">
+        {country && <span className="mr-1.5">{countryName(country)}</span>}
+        <span className="text-muted-foreground font-mono">{ip}</span>
+      </span>
+    </span>
+  )
+}
+
+// DB-IP Lite is CC BY 4.0, which asks for this wherever its data shows.
+export function GeoAttribution({ className }: { className?: string }) {
+  return (
+    <p className={cn("text-muted-foreground text-xs", className)}>
+      <a href="https://db-ip.com" target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+        IP Geolocation by DB-IP
+      </a>
+    </p>
   )
 }
 

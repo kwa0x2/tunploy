@@ -15,7 +15,6 @@ const (
 	maxMTU        = 1500
 )
 
-// Validate reports problems keyed by the instance's JSON field names.
 func (in Instance) Validate() map[string]string {
 	fields := map[string]string{}
 
@@ -80,8 +79,7 @@ func (p Peer) Validate() map[string]string {
 	return fields
 }
 
-// checkName also keeps names safe to write into config comments: a newline
-// there would let a name smuggle in a PostUp line.
+// A newline in a config comment would let a name smuggle in a PostUp line.
 func checkName(name string) string {
 	switch {
 	case strings.TrimSpace(name) == "":
@@ -94,7 +92,6 @@ func checkName(name string) string {
 	return ""
 }
 
-// ValidHost accepts an IP address or a DNS name, but not a port.
 func ValidHost(host string) bool {
 	if _, err := netip.ParseAddr(host); err == nil {
 		return true

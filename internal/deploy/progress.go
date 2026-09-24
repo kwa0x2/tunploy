@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// Step is a stage of bringing an instance up. The manager reports the first
-// two; image/tunploy-wg.sh reports the rest as it runs.
+// The manager reports the first two steps, image/tunploy-wg.sh the rest.
 type Step string
 
 const (
@@ -21,7 +20,6 @@ const (
 	StepNAT       Step = "nat"
 )
 
-// Progress hears about each step as it completes. A nil Progress is fine.
 type Progress func(Step)
 
 func (p Progress) report(s Step) {
@@ -39,9 +37,7 @@ const (
 
 var errBootTimeout = errors.New("boot timed out")
 
-// BootError is a container that exited or hung before WireGuard came up.
-// Log keeps its last lines, since a failed create removes the container and
-// with it the only record of why.
+// Log outlives the container, which a failed create removes.
 type BootError struct {
 	Reason string
 	Log    []string
@@ -49,8 +45,6 @@ type BootError struct {
 
 func (e *BootError) Error() string { return e.Reason }
 
-// waitReady follows a just-started container's output until the script
-// reports the tunnel is up.
 func (m *Manager) waitReady(ctx context.Context, name string, progress Progress) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, bootTimeout, errBootTimeout)
 	defer cancel()

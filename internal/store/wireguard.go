@@ -65,8 +65,7 @@ func (s *Store) InstanceByID(ctx context.Context, id int64) (*wg.Instance, error
 		`SELECT `+instanceColumns+` FROM wg_instances WHERE id = ?`, id))
 }
 
-// UpdateInstance leaves the address and keys alone: changing either would
-// break every config already handed out to peers.
+// Address and keys stay: changing them would break every issued config.
 func (s *Store) UpdateInstance(ctx context.Context, in wg.Instance) (*wg.Instance, error) {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE wg_instances SET name = ?, listen_port = ?, endpoint = ?, dns = ?, mtu = ?,
@@ -83,7 +82,6 @@ func (s *Store) UpdateInstance(ctx context.Context, in wg.Instance) (*wg.Instanc
 	return s.InstanceByID(ctx, in.ID)
 }
 
-// DeleteInstance also removes the instance's peers.
 func (s *Store) DeleteInstance(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM wg_instances WHERE id = ?`, id)
 	if err != nil {
@@ -92,9 +90,7 @@ func (s *Store) DeleteInstance(ctx context.Context, id int64) error {
 	return expectOneRow(res, "delete instance")
 }
 
-// CreatePeer assigns the lowest free address in the instance's subnet.
-// Allocation and insert share a transaction, and with the pool capped at one
-// connection that serialises concurrent creates.
+// One transaction on a one-connection pool serialises address allocation.
 func (s *Store) CreatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -186,8 +182,6 @@ func (s *Store) Peers(ctx context.Context, instanceID int64) ([]wg.Peer, error) 
 	return peers, rows.Err()
 }
 
-// PeerCounts maps instance ID to its number of peers; instances without
-// peers are absent.
 func (s *Store) PeerCounts(ctx context.Context) (map[int64]int, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT instance_id, COUNT(*) FROM wg_peers GROUP BY instance_id`)
 	if err != nil {
@@ -310,8 +304,7 @@ func joinList[T fmt.Stringer](items []T) string {
 	return strings.Join(parts, ",")
 }
 
-// parseList returns an empty, non-nil slice for an empty column so the API
-// encodes it as [] rather than null.
+// Non-nil so the API encodes [] rather than null.
 func parseList[T any](s string, parse func(string) (T, error)) ([]T, error) {
 	out := []T{}
 	if s == "" {

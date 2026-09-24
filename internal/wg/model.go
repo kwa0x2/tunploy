@@ -17,17 +17,15 @@ var (
 	DefaultDNS     = []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("1.0.0.1")}
 )
 
-// Instance is one WireGuard interface, run as its own container.
 type Instance struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
-	// Address is the server's own address; its prefix length sets the subnet
-	// peers are allocated from.
+	// The prefix length sets the subnet peers get addresses from.
 	Address    netip.Prefix `json:"address"`
 	ListenPort int          `json:"listen_port"`
 	PrivateKey Key          `json:"-"`
 	PublicKey  Key          `json:"public_key"`
-	// Endpoint is the host clients dial; the port always comes from ListenPort.
+	// Host only; the port comes from ListenPort.
 	Endpoint            string         `json:"endpoint"`
 	DNS                 []netip.Addr   `json:"dns"`
 	MTU                 int            `json:"mtu"`
@@ -37,8 +35,7 @@ type Instance struct {
 	UpdatedAt           time.Time      `json:"updated_at"`
 }
 
-// Peer is a client of an instance. Its private key is kept so the panel can
-// hand out the config and QR code again later.
+// The private key is kept so the config and QR code can be shown again.
 type Peer struct {
 	ID           int64      `json:"id"`
 	InstanceID   int64      `json:"instance_id"`
@@ -52,7 +49,6 @@ type Peer struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
-// NewInstance returns an instance with fresh keys and full-tunnel defaults.
 func NewInstance(name, endpoint string) Instance {
 	priv := GeneratePrivateKey()
 	return Instance{
@@ -68,7 +64,6 @@ func NewInstance(name, endpoint string) Instance {
 	}
 }
 
-// NewPeer returns an enabled peer with fresh keys; the store assigns its address.
 func NewPeer(instanceID int64, name string) Peer {
 	priv := GeneratePrivateKey()
 	return Peer{

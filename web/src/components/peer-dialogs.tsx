@@ -28,7 +28,6 @@ interface NameProps {
   onSaved: (result: SaveResult) => void
 }
 
-// peer is missing when the save went through but the tunnel refused it.
 type SaveResult = { peer?: Peer; warning?: string }
 
 export function PeerNameDialog({ open, onOpenChange, instanceId, peer, onSaved }: NameProps) {

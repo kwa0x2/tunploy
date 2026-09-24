@@ -12,8 +12,6 @@ const (
 	maxNameLength     = 80
 )
 
-// ValidateAccount checks a new account and reports problems by field, so the
-// CLI and the API describe a bad value the same way.
 func ValidateAccount(name, email, password string) map[string]string {
 	fields := map[string]string{}
 
@@ -37,8 +35,7 @@ func ValidateAccount(name, email, password string) map[string]string {
 	return fields
 }
 
-// validEmail rejects display-name forms like "Ada <ada@example.com>", which
-// mail.ParseAddress would otherwise accept.
+// mail.ParseAddress alone accepts "Ada <ada@example.com>".
 func validEmail(email string) bool {
 	addr, err := mail.ParseAddress(email)
 	return err == nil && addr.Address == email

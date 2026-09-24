@@ -18,8 +18,6 @@ type User struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// NormalizeEmail is applied on both write and lookup so addresses match
-// regardless of how they were typed.
 func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
@@ -48,9 +46,7 @@ func (s *Store) CreateUser(ctx context.Context, name, email, passwordHash string
 	return s.userFromInsert(res, name, email, passwordHash, now)
 }
 
-// CreateFirstUser creates the administrator only while the table is empty.
-// The emptiness check lives inside the INSERT because a separate count would
-// let two concurrent requests each believe they are the first.
+// The emptiness check is inside the INSERT so two requests can't both be first.
 func (s *Store) CreateFirstUser(ctx context.Context, name, email, passwordHash string) (*User, error) {
 	now := time.Now().Unix()
 	email = NormalizeEmail(email)

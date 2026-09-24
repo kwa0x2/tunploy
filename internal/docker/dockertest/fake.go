@@ -1,5 +1,4 @@
-// Package dockertest is an in-memory stand-in for the Docker daemon, for
-// tests that exercise deploy logic without one.
+// Package dockertest is an in-memory Docker daemon for tests.
 package dockertest
 
 import (
@@ -29,14 +28,12 @@ type Fake struct {
 	Unavailable bool
 	// StartErr is returned by StartContainer, e.g. a port already in use.
 	StartErr error
-	// ExecOutput answers Exec; by default it returns an empty `wg show dump`.
+	// ExecOutput defaults to an empty `wg show dump`.
 	ExecOutput func(name string, cmd []string) ([]byte, error)
-	// LogOutput, when set, is what Logs returns for every container.
+	// LogOutput, when set, replaces every container's output.
 	LogOutput string
-	// BootLog is what a container prints once started; the default is a
-	// clean start of the WireGuard image.
-	BootLog string
-	// BootExitCode, when not zero, makes started containers exit with it.
+	// BootLog is what a started container prints; defaults to ReadyLog.
+	BootLog      string
 	BootExitCode int
 
 	logs map[string]string
@@ -217,7 +214,6 @@ func (f *Fake) Logs(ctx context.Context, id string, tail int, follow bool) (io.R
 	return io.NopCloser(strings.NewReader(f.logs[ct.Name])), nil
 }
 
-// Container returns a copy of the named container, if it exists.
 func (f *Fake) Container(name string) (docker.Container, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -228,7 +224,6 @@ func (f *Fake) Container(name string) (docker.Container, bool) {
 	return *ct, true
 }
 
-// Spec returns what the named container was created with.
 func (f *Fake) Spec(name string) (docker.ContainerSpec, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -236,7 +231,6 @@ func (f *Fake) Spec(name string) (docker.ContainerSpec, bool) {
 	return spec, ok
 }
 
-// Add plants a container as if something else had created it.
 func (f *Fake) Add(ct docker.Container) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

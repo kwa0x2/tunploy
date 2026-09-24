@@ -43,21 +43,20 @@ import { InstanceFormDialog } from "@/components/instance-form-dialog"
 import { LogsDialog } from "@/components/logs-dialog"
 import { PageHeader } from "@/components/page-header"
 import { PeerConfigDialog, PeerNameDialog } from "@/components/peer-dialogs"
-import { DeviceIcon, InstanceStatus, PeerStatus, PeerTraffic } from "@/components/status"
+import { DeviceIcon, InstanceStatus, Location, PeerStatus, PeerTraffic } from "@/components/status"
 import { useNow } from "@/hooks/use-now"
 import { useResource } from "@/hooks/use-resource"
 import { useTarget } from "@/hooks/use-target"
 import { ApiError, api, peerConfigUrl } from "@/lib/api"
 import type { Instance, Peer } from "@/lib/api"
-import { endpointOf, errorMessage, formatRelative, isOnline } from "@/lib/format"
+import { endpointHost, endpointOf, errorMessage, formatRelative, isOnline } from "@/lib/format"
 
 const pollMs = 5_000
 
 export function ServerDetailPage() {
   const id = Number(useParams().id)
   if (!Number.isInteger(id) || id <= 0) return <ServerMissing />
-  // Keyed so switching servers starts from a clean slate instead of
-  // flashing the previous server's data.
+  // Keyed so switching servers doesn't flash the previous one's data.
   return <ServerDetail key={id} id={id} />
 }
 
@@ -353,6 +352,7 @@ function PeersCard({ instance, peers, error, reload }: {
                 <TableHead>Name</TableHead>
                 <TableHead>Address</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Location</TableHead>
                 <TableHead>Traffic</TableHead>
                 <TableHead>Enabled</TableHead>
                 <TableHead className="w-0" />
@@ -375,6 +375,12 @@ function PeersCard({ instance, peers, error, reload }: {
                         enabled={peer.enabled}
                         online={isOnline(peer)}
                         lastSeen={handshake && formatRelative(handshake, now)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Location
+                        ip={peer.stats?.endpoint && endpointHost(peer.stats.endpoint)}
+                        country={peer.country}
                       />
                     </TableCell>
                     <TableCell>
@@ -447,7 +453,6 @@ function PeersCard({ instance, peers, error, reload }: {
         instanceId={instance.id}
         onSaved={({ peer, warning }) => {
           if (warning) toast.warning(warning)
-          // Straight to the QR code: scanning it is the only thing left to do.
           if (peer) showing.show(peer)
           void reload()
         }}

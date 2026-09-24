@@ -1,5 +1,4 @@
-// Package httpx holds the JSON encoding, request decoding and error envelope
-// shared by every handler.
+// Package httpx holds the JSON and error envelope shared by every handler.
 package httpx
 
 import (
@@ -55,7 +54,6 @@ func Invalid(fields map[string]string) *Error {
 	}
 }
 
-// Handler is an http.Handler that reports failures by returning them.
 type Handler func(w http.ResponseWriter, r *http.Request) error
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -99,8 +97,7 @@ func Decode(r *http.Request, v any) error {
 	return nil
 }
 
-// WriteError reports anything that is not an *Error as a generic internal
-// error, so implementation details never reach the client.
+// Anything but an *Error goes out generic, so internals never leak.
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	var apiErr *Error
 	if !errors.As(err, &apiErr) {

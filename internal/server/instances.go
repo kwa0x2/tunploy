@@ -19,8 +19,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
 
-// instanceRequest uses pointers so a PATCH only touches what it sends and a
-// create falls back to defaults for what it leaves out.
+// Pointers: PATCH touches only what it sends, create defaults the rest.
 type instanceRequest struct {
 	Name                *string   `json:"name"`
 	Address             *string   `json:"address"`
@@ -69,8 +68,7 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) error
 	return s.writeInstance(w, r, http.StatusOK, in)
 }
 
-// handleCreateInstance saves and deploys in one step. If the deploy fails
-// the instance is rolled back, so one click either works or changes nothing.
+// A failed deploy rolls back, so one click either works or changes nothing.
 func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) error {
 	var req instanceRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -105,16 +103,15 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 		return s.streamProvision(w, r, created)
 	}
 	if err := s.deploy.Provision(r.Context(), created.ID, nil); err != nil {
-		s.rollbackInstance(context.WithoutCancel(r.Context()), created.ID)
+		s.failedCreate(r.Context(), created, err)
 		return deployError(err)
 	}
+	s.record(r.Context(), instanceEvent("server.created", created))
 	return s.writeInstance(w, r, http.StatusCreated, created)
 }
 
 const ndjson = "application/x-ndjson"
 
-// provisionEvent is one line of a streamed create: each step as it
-// completes, then the instance or the error that stopped it.
 type provisionEvent struct {
 	Step     deploy.Step   `json:"step,omitempty"`
 	Instance *instanceView `json:"instance,omitempty"`
@@ -122,9 +119,7 @@ type provisionEvent struct {
 	Log      []string      `json:"log,omitempty"`
 }
 
-// streamProvision is how the panel shows a deploy step by step. Everything
-// that can be rejected up front already has been, so the status is always
-// 200 and the outcome is in the last line.
+// Validation already ran, so the status is 200 and the outcome is the last line.
 func (s *Server) streamProvision(w http.ResponseWriter, r *http.Request, in *wg.Instance) error {
 	h := w.Header()
 	h.Set("Content-Type", ndjson)
@@ -144,7 +139,7 @@ func (s *Server) streamProvision(w http.ResponseWriter, r *http.Request, in *wg.
 		send(provisionEvent{Step: step})
 	})
 	if err != nil {
-		s.rollbackInstance(context.WithoutCancel(r.Context()), in.ID)
+		s.failedCreate(r.Context(), in, err)
 		ev := provisionEvent{}
 		errors.As(deployError(err), &ev.Error)
 		var boot *deploy.BootError
@@ -161,11 +156,11 @@ func (s *Server) streamProvision(w http.ResponseWriter, r *http.Request, in *wg.
 		send(provisionEvent{Error: httpx.Errorf(http.StatusInternalServerError, "internal_error", "something went wrong")})
 		return nil
 	}
+	s.record(r.Context(), instanceEvent("server.created", in))
 	send(provisionEvent{Instance: &view})
 	return nil
 }
 
-// handleInstanceDefaults tells the create form what an empty field turns into.
 func (s *Server) handleInstanceDefaults(w http.ResponseWriter, r *http.Request) error {
 	existing, err := s.store.Instances(r.Context())
 	if err != nil {
@@ -208,6 +203,13 @@ func (s *Server) defaultInstance(ctx context.Context, existing []wg.Instance) (w
 	return in, nil
 }
 
+func (s *Server) failedCreate(ctx context.Context, in *wg.Instance, err error) {
+	s.rollbackInstance(context.WithoutCancel(ctx), in.ID)
+	e := instanceEvent("server.deploy_failed", in)
+	e.Detail = err.Error()
+	s.record(ctx, e)
+}
+
 func (s *Server) rollbackInstance(ctx context.Context, id int64) {
 	if err := s.deploy.Remove(ctx, id); err != nil {
 		slog.Warn("roll back instance container", "instance", id, "error", err)
@@ -241,8 +243,8 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) er
 		return instanceWriteError(err)
 	}
 
-	// Port bindings and the interface MTU are fixed when the container is
-	// created; everything else only shows up in client configs.
+	// Port and MTU are fixed at container creation.
+	s.record(r.Context(), instanceEvent("server.updated", updated))
 	if updated.ListenPort != current.ListenPort || updated.MTU != current.MTU {
 		if err := s.deploy.Redeploy(r.Context(), updated.ID); err != nil {
 			return deployError(err)
@@ -256,18 +258,18 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	// Container first: if Docker is down we would rather keep the row than
-	// leave a tunnel running that the panel no longer knows about.
+	// Container first: a leftover row beats a tunnel the panel forgot.
 	if err := s.deploy.Remove(r.Context(), in.ID); err != nil {
 		return deployError(err)
 	}
 	if err := s.store.DeleteInstance(r.Context(), in.ID); err != nil {
 		return err
 	}
+	s.record(r.Context(), instanceEvent("server.deleted", in))
 	return httpx.NoContent(w)
 }
 
-func (s *Server) handleInstanceAction(action func(*deploy.Manager, context.Context, int64) error) httpx.Handler {
+func (s *Server) handleInstanceAction(kind string, action func(*deploy.Manager, context.Context, int64) error) httpx.Handler {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		in, err := s.instanceFromPath(r)
 		if err != nil {
@@ -276,6 +278,7 @@ func (s *Server) handleInstanceAction(action func(*deploy.Manager, context.Conte
 		if err := action(s.deploy, r.Context(), in.ID); err != nil {
 			return deployError(err)
 		}
+		s.record(r.Context(), instanceEvent(kind, in))
 		return s.writeInstance(w, r, http.StatusOK, in)
 	}
 }
@@ -312,7 +315,6 @@ func (s *Server) instanceFromPath(r *http.Request) (*wg.Instance, error) {
 	return in, err
 }
 
-// apply copies the request onto in and returns parse errors by field.
 func (req instanceRequest) apply(in *wg.Instance) map[string]string {
 	fields := map[string]string{}
 
@@ -367,8 +369,7 @@ func parseEach[T any](items []string, parse func(string) (T, error)) ([]T, error
 	return out, nil
 }
 
-// validationError prefers parse errors: validating a value that failed to
-// parse would only add a vaguer message for the same field.
+// Parse errors win over the vaguer validation of the same field.
 func validationError(validated, parsed map[string]string) error {
 	for k, v := range parsed {
 		validated[k] = v
@@ -392,8 +393,7 @@ func instanceWriteError(err error) error {
 	return err
 }
 
-// deployError passes Docker's own message through: "port is already
-// allocated" is exactly what the admin needs to see.
+// Docker's message goes through: "port is already allocated" is what the admin needs.
 func deployError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -417,8 +417,6 @@ func overlapping(existing []wg.Instance, addr netip.Prefix) *wg.Instance {
 	return nil
 }
 
-// nextFreeSubnet walks 10.8.0.1/24, 10.9.0.1/24, ... so every instance gets
-// its own range without the admin picking one.
 func nextFreeSubnet(existing []wg.Instance) netip.Prefix {
 	for second := 8; second <= 255; second++ {
 		p := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(second), 0, 1}), 24)

@@ -10,8 +10,6 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Exec runs cmd inside a managed container and returns its stdout. A non-zero
-// exit is an error that carries stderr.
 func (c *Client) Exec(ctx context.Context, id string, cmd []string) ([]byte, error) {
 	if err := c.ensureManaged(ctx, id); err != nil {
 		return nil, err

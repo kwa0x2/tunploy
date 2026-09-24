@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 import { Loader2 } from "lucide-react"
 import { Toaster } from "@/components/ui/sonner"
 import { AppShell } from "@/components/layout/app-shell"
+import { ActivityPage } from "@/pages/activity"
 import { AdminMissingPage } from "@/pages/admin-missing"
 import { LoginPage } from "@/pages/login"
 import { NotFoundPage } from "@/pages/not-found"
@@ -48,6 +49,7 @@ function Routing() {
         <Route path="/servers" element={<ServersPage />} />
         <Route path="/servers/:id" element={<ServerDetailPage />} />
         <Route path="/peers" element={<PeersPage />} />
+        <Route path="/activity" element={<ActivityPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="/login" element={<Navigate to="/" replace />} />

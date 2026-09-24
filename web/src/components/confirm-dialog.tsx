@@ -23,7 +23,6 @@ interface Props {
   onConfirm: () => Promise<void>
 }
 
-// ConfirmDialog stays open while onConfirm runs, and closes only if it succeeds.
 export function ConfirmDialog({ open, onOpenChange, title, description, confirmLabel, onConfirm }: Props) {
   const [busy, setBusy] = useState(false)
 

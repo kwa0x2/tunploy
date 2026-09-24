@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-// useResource loads data once and, with pollMs, keeps it fresh while the tab
-// is visible. Only the newest request may write state, so a slow poll can't
-// overwrite what a mutation just reloaded.
+// Only the newest request writes state, so a slow poll can't undo a reload.
 export function useResource<T>(load: () => Promise<T>, pollMs?: number) {
   const [data, setData] = useState<T>()
   const [error, setError] = useState<unknown>()
