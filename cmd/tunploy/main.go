@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/config"
+	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
@@ -51,15 +52,22 @@ func run() error {
 	}
 	defer dk.Close()
 
+	mgr, err := deploy.New(st, dk, cfg.DataDir)
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	logDockerStatus(ctx, dk)
+	if logDockerStatus(ctx, dk) {
+		go reconcile(ctx, mgr)
+	}
 	go purgeExpiredSessions(ctx, st)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           server.New(cfg, st, dk),
+		Handler:           server.New(cfg, st, dk, mgr),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
@@ -90,16 +98,27 @@ func run() error {
 
 // A missing daemon is not fatal: the panel still has to come up so the
 // admin can see what is wrong and fix it from there.
-func logDockerStatus(ctx context.Context, dk *docker.Client) {
+func logDockerStatus(ctx context.Context, dk *docker.Client) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	info, err := dk.Ping(ctx)
 	if err != nil {
 		slog.Warn("docker is not reachable; VPN services cannot be deployed", "error", err)
-		return
+		return false
 	}
 	slog.Info("connected to docker", "version", info.Version, "api_version", info.APIVersion)
+	return true
+}
+
+// reconcile runs beside the HTTP server because a first run may build the
+// WireGuard image, and the panel should not wait on that to come up.
+func reconcile(ctx context.Context, mgr *deploy.Manager) {
+	if err := mgr.Reconcile(ctx); err != nil {
+		slog.Error("reconcile wireguard containers", "error", err)
+		return
+	}
+	slog.Info("wireguard containers reconciled")
 }
 
 func purgeExpiredSessions(ctx context.Context, st *store.Store) {

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/config"
+	"github.com/kwa0x2/tunploy/internal/deploy"
+	"github.com/kwa0x2/tunploy/internal/docker/dockertest"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
@@ -23,6 +25,12 @@ func newTestServer(t *testing.T) *Server {
 
 func newTestServerWithDocker(t *testing.T, dk Docker) *Server {
 	t.Helper()
+	s, _ := newTestServerWithDeploy(t, dk, dockertest.New())
+	return s
+}
+
+func newTestServerWithDeploy(t *testing.T, dk Docker, fk *dockertest.Fake) (*Server, *deploy.Manager) {
+	t.Helper()
 
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -30,7 +38,12 @@ func newTestServerWithDocker(t *testing.T, dk Docker) *Server {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	return New(config.Config{SessionTTL: time.Hour}, st, dk)
+	mgr, err := deploy.New(st, fk, t.TempDir())
+	if err != nil {
+		t.Fatalf("new deploy manager: %v", err)
+	}
+	cfg := config.Config{SessionTTL: time.Hour, PublicHost: "vpn.example.com"}
+	return New(cfg, st, dk, mgr), mgr
 }
 
 func do(t *testing.T, s *Server, method, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {

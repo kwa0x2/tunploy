@@ -8,6 +8,7 @@ import (
 const (
 	DefaultListenPort = 51820
 	DefaultKeepalive  = 25
+	DefaultMTU        = 1420
 )
 
 var DefaultAddress = netip.MustParsePrefix("10.8.0.1/24")

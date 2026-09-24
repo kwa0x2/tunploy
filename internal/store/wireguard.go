@@ -186,6 +186,27 @@ func (s *Store) Peers(ctx context.Context, instanceID int64) ([]wg.Peer, error) 
 	return peers, rows.Err()
 }
 
+// PeerCounts maps instance ID to its number of peers; instances without
+// peers are absent.
+func (s *Store) PeerCounts(ctx context.Context) (map[int64]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT instance_id, COUNT(*) FROM wg_peers GROUP BY instance_id`)
+	if err != nil {
+		return nil, fmt.Errorf("count peers: %w", err)
+	}
+	defer rows.Close()
+
+	counts := map[int64]int{}
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scan peer count: %w", err)
+		}
+		counts[id] = n
+	}
+	return counts, rows.Err()
+}
+
 func (s *Store) PeerByID(ctx context.Context, id int64) (*wg.Peer, error) {
 	return scanPeer(s.db.QueryRowContext(ctx, `SELECT `+peerColumns+` FROM wg_peers WHERE id = ?`, id))
 }

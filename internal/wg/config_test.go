@@ -51,6 +51,14 @@ func TestServerConfigGolden(t *testing.T) {
 	golden(t, "server.conf", ServerConfig(in, peers))
 }
 
+func TestServerConfigDefaultsMTU(t *testing.T) {
+	in, _ := fixture()
+	in.MTU = 0
+	if !strings.Contains(string(ServerConfig(in, nil)), "MTU = 1420\n") {
+		t.Fatal("server config must pin the MTU when none is set")
+	}
+}
+
 func TestClientConfigGolden(t *testing.T) {
 	in, peers := fixture()
 	golden(t, "client.conf", ClientConfig(in, peers[0]))

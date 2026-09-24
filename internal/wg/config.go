@@ -19,9 +19,13 @@ func ServerConfig(in Instance, peers []Peer) []byte {
 	field(&b, "PrivateKey", in.PrivateKey.String())
 	field(&b, "Address", in.Address.String())
 	field(&b, "ListenPort", strconv.Itoa(in.ListenPort))
-	if in.MTU > 0 {
-		field(&b, "MTU", strconv.Itoa(in.MTU))
+	// Left to itself wg-quick derives the MTU from the container's eth0,
+	// which is 65535 on some Docker setups and would fragment every packet.
+	mtu := in.MTU
+	if mtu == 0 {
+		mtu = DefaultMTU
 	}
+	field(&b, "MTU", strconv.Itoa(mtu))
 
 	for _, p := range peers {
 		if !p.Enabled {
