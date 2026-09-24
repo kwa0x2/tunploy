@@ -40,25 +40,26 @@ curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh \
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `TUNPLOY_PUBLIC_HOST` | detected public IPv4 | Hostname or IP that VPN clients dial. |
-| `TUNPLOY_BIND` | `127.0.0.1` | Address the panel listens on. `0.0.0.0` exposes it to the internet. |
+| `TUNPLOY_BIND` | `0.0.0.0` | Address the panel listens on. `127.0.0.1` keeps it reachable only over an SSH tunnel. |
 | `TUNPLOY_PORT` | `3000` | Panel port. |
 | `TUNPLOY_VERSION` | `latest` | Image tag, for example `0.1.0` or `edge`. |
 | `TUNPLOY_IMAGE` | `ghcr.io/kwa0x2/tunploy` | Image to install, for forks and mirrors. |
 | `TUNPLOY_ADMIN_NAME`, `TUNPLOY_ADMIN_EMAIL`, `TUNPLOY_ADMIN_PASSWORD` | asked | Create the admin account without prompting, for automated installs. |
 
-## Sign in over an SSH tunnel
+## Sign in
 
-By default the panel listens only on the server itself, because it serves plain HTTP: over the internet, your password and session would travel unencrypted. Reach it through SSH instead, which encrypts the connection.
+Open `http://YOUR_SERVER_IP:3000` and sign in with the account you created during the install. The panel is public, but there is no sign-up page: only the account made on the server can get in.
 
-On your own computer:
+The panel serves plain HTTP, so your password and session travel unencrypted. That is fine from a network you trust; for anything else, pick one of these:
 
-```sh
-ssh -L 3000:localhost:3000 root@YOUR_SERVER_IP
-```
+- **Put it behind a reverse proxy with HTTPS** (Caddy, nginx, Traefik) and set `TUNPLOY_SECURE_COOKIES=true`.
+- **Keep it private** and reach it through SSH, which encrypts the connection. Install with `TUNPLOY_BIND=127.0.0.1`, then on your own computer run:
 
-Leave that terminal open, browse to <http://localhost:3000> and sign in with the account you created during the install.
+  ```sh
+  ssh -L 3000:localhost:3000 root@YOUR_SERVER_IP
+  ```
 
-With `TUNPLOY_BIND=0.0.0.0` the panel is reachable at `http://YOUR_SERVER_IP:3000`. That is fine for a quick test from a trusted network; for anything longer, put it behind a reverse proxy with HTTPS and set `TUNPLOY_SECURE_COOKIES=true`.
+  Leave that terminal open and browse to <http://localhost:3000>.
 
 ## Manage the admin account
 
@@ -74,9 +75,9 @@ docker exec -it tunploy tunploy admin reset-password --email you@example.com
 
 Once signed in, you can also change the password under **Settings**.
 
-## Open the WireGuard port
+## Open the ports
 
-Each VPN server listens on its own UDP port: the first on 51820, the next on 51821, and so on. Docker publishes these ports itself, past host firewalls such as `ufw`, so there is nothing to open on the server. Your hosting provider's firewall is separate: in Hetzner, AWS, Oracle Cloud, GCP and most others, add an inbound rule for **UDP 51820** (and each further port you use) in the provider's console.
+The panel listens on **TCP 3000**, and each VPN server on its own UDP port: the first on 51820, the next on 51821, and so on. Docker publishes these ports itself, past host firewalls such as `ufw`, so there is nothing to open on the server. Your hosting provider's firewall is separate: in Hetzner, AWS, Oracle Cloud, GCP and most others, add inbound rules for **TCP 3000** and **UDP 51820** (and each further UDP port you use) in the provider's console.
 
 ## Create your first VPN
 
@@ -97,7 +98,7 @@ services:
     container_name: tunploy
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     environment:
       TUNPLOY_PUBLIC_HOST: "YOUR_SERVER_IP"
     volumes:

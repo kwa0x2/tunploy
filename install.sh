@@ -6,13 +6,13 @@
 # Running it again upgrades to the newest image; data in /var/lib/tunploy is kept.
 #
 # Optional environment, passed after sudo so it survives it
-# (curl ... | sudo TUNPLOY_BIND=0.0.0.0 sh):
+# (curl ... | sudo TUNPLOY_PORT=8080 sh):
 #   TUNPLOY_IMAGE        image to install (default: ghcr.io/kwa0x2/tunploy)
 #   TUNPLOY_VERSION      image tag to install (default: latest)
 #   TUNPLOY_PUBLIC_HOST  hostname or IP devices dial (default: this server's public IPv4)
 #   TUNPLOY_PORT         panel port (default: 3000)
-#   TUNPLOY_BIND         address the panel listens on (default: 127.0.0.1, reachable
-#                        over an SSH tunnel; 0.0.0.0 exposes it to the internet)
+#   TUNPLOY_BIND         address the panel listens on (default: 0.0.0.0, reachable
+#                        from the internet; 127.0.0.1 keeps it behind an SSH tunnel)
 #   TUNPLOY_ADMIN_NAME, TUNPLOY_ADMIN_EMAIL, TUNPLOY_ADMIN_PASSWORD
 #                        create the admin account without prompting
 set -eu
@@ -23,7 +23,9 @@ DATA_DIR=/var/lib/tunploy
 
 VERSION=${TUNPLOY_VERSION:-latest}
 PORT=${TUNPLOY_PORT:-3000}
-BIND=${TUNPLOY_BIND:-127.0.0.1}
+# Public by default: there is no sign-up page to race for, since the admin
+# is created below by whoever runs this script.
+BIND=${TUNPLOY_BIND:-0.0.0.0}
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -194,8 +196,9 @@ print_summary() {
 		echo
 		echo "  and open http://localhost:$PORT."
 	else
-		echo "  Open http://${host:-<server-ip>}:$PORT. It is plain HTTP, so prefer a trusted network"
-		echo "  or put it behind a reverse proxy with HTTPS."
+		echo "  Open http://${host:-<server-ip>}:$PORT"
+		echo
+		echo "  The panel speaks plain HTTP, so avoid signing in over networks you do not trust."
 	fi
 	echo
 	case "${ADMIN:-}" in
@@ -208,7 +211,12 @@ print_summary() {
 	else
 		echo "  The public IP could not be detected; set it under Settings in the panel."
 	fi
-	echo "  Allow UDP 51820 (plus one more port per extra server) in your provider's firewall."
+	if [ "$BIND" = 127.0.0.1 ]; then
+		echo "  Allow UDP 51820 (plus one more port per extra server) in your provider's firewall."
+	else
+		echo "  Allow TCP $PORT for the panel and UDP 51820 (plus one more port per extra server)"
+		echo "  in your provider's firewall, if it has one."
+	fi
 	echo
 }
 

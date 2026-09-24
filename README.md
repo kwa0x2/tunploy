@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh | su
 
 The script installs Docker if needed, starts Tunploy, asks for your admin account and prints how to open the panel. Then create a server, add a peer and scan its QR code with the WireGuard app.
 
-See [docs/install.md](docs/install.md) for options, the SSH tunnel for the first sign-in, firewall ports and troubleshooting.
+See [docs/install.md](docs/install.md) for options, HTTPS and private access, firewall ports and troubleshooting.
 
 ## Development
 
