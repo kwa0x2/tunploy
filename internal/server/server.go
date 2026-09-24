@@ -58,6 +58,7 @@ func (s *Server) routes() http.Handler {
 
 	private.Handle("GET /api/instances", httpx.Handler(s.handleListInstances))
 	private.Handle("POST /api/instances", httpx.Handler(s.handleCreateInstance))
+	private.Handle("GET /api/instances/defaults", httpx.Handler(s.handleInstanceDefaults))
 	private.Handle("GET /api/instances/{id}", httpx.Handler(s.handleGetInstance))
 	private.Handle("PATCH /api/instances/{id}", httpx.Handler(s.handleUpdateInstance))
 	private.Handle("DELETE /api/instances/{id}", httpx.Handler(s.handleDeleteInstance))

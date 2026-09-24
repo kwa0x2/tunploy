@@ -5,7 +5,10 @@ import { AppShell } from "@/components/layout/app-shell"
 import { LoginPage } from "@/pages/login"
 import { NotFoundPage } from "@/pages/not-found"
 import { OverviewPage } from "@/pages/overview"
+import { PeersPage } from "@/pages/peers"
 import { PlaceholderPage } from "@/pages/placeholder"
+import { ServerDetailPage } from "@/pages/server-detail"
+import { ServersPage } from "@/pages/servers"
 import { SetupPage } from "@/pages/setup"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { ThemeProvider } from "@/lib/theme"
@@ -43,19 +46,9 @@ function Routing() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<OverviewPage />} />
-        <Route
-          path="/servers"
-          element={
-            <PlaceholderPage
-              title="Servers"
-              description="WireGuard instances running on this node."
-            />
-          }
-        />
-        <Route
-          path="/peers"
-          element={<PlaceholderPage title="Peers" description="Devices allowed onto your VPN." />}
-        />
+        <Route path="/servers" element={<ServersPage />} />
+        <Route path="/servers/:id" element={<ServerDetailPage />} />
+        <Route path="/peers" element={<PeersPage />} />
         <Route
           path="/settings"
           element={<PlaceholderPage title="Settings" description="Panel and node configuration." />}

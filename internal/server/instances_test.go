@@ -132,6 +132,25 @@ func TestOneClickInstance(t *testing.T) {
 	}
 }
 
+func TestInstanceDefaultsFollowExistingInstances(t *testing.T) {
+	p := newPanel(t)
+
+	var d instanceJSON
+	p.want(p.do("GET", "/api/instances/defaults", nil), http.StatusOK, &d)
+	if d.Address != "10.8.0.1/24" || d.ListenPort != 51820 || d.Endpoint != "vpn.example.com" {
+		t.Fatalf("defaults = %+v", d)
+	}
+
+	p.createInstance(map[string]any{"name": "Home"})
+	p.want(p.do("GET", "/api/instances/defaults", nil), http.StatusOK, &d)
+	if d.Address != "10.9.0.1/24" || d.ListenPort != 51821 {
+		t.Fatalf("defaults should skip the taken subnet and port: %+v", d)
+	}
+	if d.PublicKey != "" {
+		t.Fatal("defaults must not carry keys")
+	}
+}
+
 func TestInstanceResponsesNeverLeakKeys(t *testing.T) {
 	p := newPanel(t)
 	in := p.createInstance(map[string]any{"name": "Home"})

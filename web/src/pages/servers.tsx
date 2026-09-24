@@ -1,0 +1,87 @@
+import { useState } from "react"
+import { Link } from "react-router-dom"
+import { Plus } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
+import { InstanceStatus } from "@/components/status"
+import { EmptyServers, NewServerDialog } from "@/components/new-server"
+import { PageHeader } from "@/components/page-header"
+import { useResource } from "@/hooks/use-resource"
+import { api } from "@/lib/api"
+import type { Instance } from "@/lib/api"
+import { endpointOf, errorMessage } from "@/lib/format"
+
+export function ServersPage() {
+  const { data: instances, error } = useResource(api.instances, 10_000)
+  const [creating, setCreating] = useState(false)
+
+  return (
+    <>
+      <PageHeader
+        title="Servers"
+        description="WireGuard instances running on this node."
+        actions={
+          instances?.length ? (
+            <Button onClick={() => setCreating(true)}>
+              <Plus />
+              New server
+            </Button>
+          ) : null
+        }
+      />
+
+      {error !== undefined && !instances && (
+        <Alert variant="destructive">
+          <AlertDescription>{errorMessage(error)}</AlertDescription>
+        </Alert>
+      )}
+
+      {!instances && error === undefined && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {[0, 1].map((i) => (
+            <Skeleton key={i} className="h-36 rounded-xl" />
+          ))}
+        </div>
+      )}
+
+      {instances?.length === 0 && <EmptyServers onCreate={() => setCreating(true)} />}
+
+      {instances && instances.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {instances.map((instance) => (
+            <ServerCard key={instance.id} instance={instance} />
+          ))}
+        </div>
+      )}
+
+      <NewServerDialog open={creating} onOpenChange={setCreating} />
+    </>
+  )
+}
+
+function ServerCard({ instance }: { instance: Instance }) {
+  return (
+    <Link to={`/servers/${instance.id}`} className="group rounded-xl outline-none">
+      <Card className="group-hover:ring-foreground/20 group-focus-visible:ring-ring h-full transition-shadow">
+        <CardHeader className="flex flex-row items-start justify-between gap-2">
+          <CardTitle className="truncate">{instance.name}</CardTitle>
+          <InstanceStatus state={instance.status.state} />
+        </CardHeader>
+        <CardContent className="text-muted-foreground grid grid-cols-2 gap-y-1 text-sm">
+          <span>Endpoint</span>
+          <span className="text-foreground truncate text-right font-mono text-xs leading-5">
+            {endpointOf(instance)}
+          </span>
+          <span>Subnet</span>
+          <span className="text-foreground text-right font-mono text-xs leading-5">
+            {instance.address}
+          </span>
+          <span>Peers</span>
+          <span className="text-foreground text-right tabular-nums">{instance.peer_count}</span>
+        </CardContent>
+      </Card>
+    </Link>
+  )
+}

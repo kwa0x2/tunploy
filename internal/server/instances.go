@@ -80,10 +80,7 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 
-	in := wg.NewInstance("", s.cfg.PublicHost)
-	in.Address = nextFreeSubnet(existing)
-	in.ListenPort = nextFreePort(existing)
-
+	in := s.defaultInstance(existing)
 	fields := req.apply(&in)
 	if req.Address != nil {
 		if other := overlapping(existing, in.Address); other != nil {
@@ -104,6 +101,41 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 		return deployError(err)
 	}
 	return s.writeInstance(w, r, http.StatusCreated, created)
+}
+
+// handleInstanceDefaults tells the create form what an empty field turns into.
+func (s *Server) handleInstanceDefaults(w http.ResponseWriter, r *http.Request) error {
+	existing, err := s.store.Instances(r.Context())
+	if err != nil {
+		return err
+	}
+	in := s.defaultInstance(existing)
+	return httpx.JSON(w, http.StatusOK, instanceDefaults{
+		Address:             in.Address,
+		ListenPort:          in.ListenPort,
+		Endpoint:            in.Endpoint,
+		DNS:                 in.DNS,
+		MTU:                 in.MTU,
+		PersistentKeepalive: in.PersistentKeepalive,
+		ClientAllowedIPs:    in.ClientAllowedIPs,
+	})
+}
+
+type instanceDefaults struct {
+	Address             netip.Prefix   `json:"address"`
+	ListenPort          int            `json:"listen_port"`
+	Endpoint            string         `json:"endpoint"`
+	DNS                 []netip.Addr   `json:"dns"`
+	MTU                 int            `json:"mtu"`
+	PersistentKeepalive int            `json:"persistent_keepalive"`
+	ClientAllowedIPs    []netip.Prefix `json:"client_allowed_ips"`
+}
+
+func (s *Server) defaultInstance(existing []wg.Instance) wg.Instance {
+	in := wg.NewInstance("", s.cfg.PublicHost)
+	in.Address = nextFreeSubnet(existing)
+	in.ListenPort = nextFreePort(existing)
+	return in
 }
 
 func (s *Server) rollbackInstance(ctx context.Context, id int64) {
