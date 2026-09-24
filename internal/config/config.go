@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +21,12 @@ type Config struct {
 	SecureCookies bool
 	GeoIP         bool
 	LogLevel      slog.Level
+
+	// HTTPSListen is empty when HTTPS is off; the domain itself is set in the panel.
+	HTTPSListen    string
+	HTTPListen     string
+	ACMEDirectory  string
+	TrustedProxies []netip.Prefix
 }
 
 func (c Config) DBPath() string { return filepath.Join(c.DataDir, "tunploy.db") }
@@ -33,6 +40,9 @@ func Load() (Config, error) {
 		SessionTTL:    7 * 24 * time.Hour,
 		SecureCookies: false,
 		GeoIP:         true,
+		HTTPSListen:   env("TUNPLOY_HTTPS_LISTEN", ":443"),
+		HTTPListen:    env("TUNPLOY_HTTP_LISTEN", ":80"),
+		ACMEDirectory: env("TUNPLOY_ACME_DIRECTORY", ""),
 	}
 
 	if raw := env("TUNPLOY_SESSION_TTL", ""); raw != "" {
@@ -62,6 +72,24 @@ func Load() (Config, error) {
 		cfg.GeoIP = b
 	}
 
+	if raw := env("TUNPLOY_HTTPS", ""); raw != "" {
+		on, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("TUNPLOY_HTTPS: %w", err)
+		}
+		if !on {
+			cfg.HTTPSListen, cfg.HTTPListen = "", ""
+		}
+	}
+
+	if raw := env("TUNPLOY_TRUSTED_PROXIES", ""); raw != "" {
+		prefixes, err := parsePrefixes(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("TUNPLOY_TRUSTED_PROXIES: %w", err)
+		}
+		cfg.TrustedProxies = prefixes
+	}
+
 	lvl, err := parseLevel(env("TUNPLOY_LOG_LEVEL", "info"))
 	if err != nil {
 		return Config{}, err
@@ -82,6 +110,23 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// Accepts CIDRs and bare addresses, comma or space separated.
+func parsePrefixes(raw string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, f := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' }) {
+		if p, err := netip.ParsePrefix(f); err == nil {
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(f)
+		if err != nil {
+			return nil, fmt.Errorf("%q is neither an IP address nor a CIDR", f)
+		}
+		out = append(out, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+	}
+	return out, nil
 }
 
 func parseLevel(s string) (slog.Level, error) {

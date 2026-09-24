@@ -14,6 +14,8 @@ type User struct {
 	Name         string    `json:"name"`
 	Email        string    `json:"email"`
 	PasswordHash string    `json:"-"`
+	TOTPSecret   string    `json:"-"`
+	TOTPLastStep int64     `json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -89,25 +91,56 @@ func (s *Store) userFromInsert(res sql.Result, name, email, passwordHash string,
 
 func (s *Store) UserByEmail(ctx context.Context, email string) (*User, error) {
 	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, name, email, password_hash, created_at, updated_at FROM users WHERE email = ?`,
+		`SELECT `+userColumns+` FROM users WHERE email = ?`,
 		NormalizeEmail(email)))
 }
 
 func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
 	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, name, email, password_hash, created_at, updated_at FROM users WHERE id = ?`, id))
+		`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 }
 
 func (s *Store) UpdateUserPassword(ctx context.Context, id int64, passwordHash string) error {
-	res, err := s.db.ExecContext(ctx,
+	return s.updateUser(ctx, "update password",
 		`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`,
 		passwordHash, time.Now().Unix(), id)
+}
+
+func (s *Store) EnableTOTP(ctx context.Context, id int64, secret string, usedStep int64) error {
+	return s.updateUser(ctx, "enable totp",
+		`UPDATE users SET totp_secret = ?, totp_last_step = ?, updated_at = ? WHERE id = ?`,
+		secret, usedStep, time.Now().Unix(), id)
+}
+
+func (s *Store) DisableTOTP(ctx context.Context, id int64) error {
+	return s.updateUser(ctx, "disable totp",
+		`UPDATE users SET totp_secret = '', totp_last_step = 0, updated_at = ? WHERE id = ?`,
+		time.Now().Unix(), id)
+}
+
+// ClaimTOTPStep reports false when the step, or a later one, was already used,
+// so a code seen over someone's shoulder can't be replayed within its window.
+func (s *Store) ClaimTOTPStep(ctx context.Context, id, step int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE users SET totp_last_step = ? WHERE id = ? AND totp_last_step < ?`, step, id, step)
 	if err != nil {
-		return fmt.Errorf("update password: %w", err)
+		return false, fmt.Errorf("claim totp step: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("update password: %w", err)
+		return false, fmt.Errorf("claim totp step: %w", err)
+	}
+	return n == 1, nil
+}
+
+func (s *Store) updateUser(ctx context.Context, what, query string, args ...any) error {
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%s: %w", what, err)
 	}
 	if n == 0 {
 		return ErrNotFound
@@ -115,10 +148,12 @@ func (s *Store) UpdateUserPassword(ctx context.Context, id int64, passwordHash s
 	return nil
 }
 
-func (s *Store) scanUser(row *sql.Row) (*User, error) {
+const userColumns = `id, name, email, password_hash, totp_secret, totp_last_step, created_at, updated_at`
+
+func (s *Store) scanUser(row rowScanner) (*User, error) {
 	var u User
 	var created, updated int64
-	if err := row.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &created, &updated); err != nil {
+	if err := row.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.TOTPSecret, &u.TOTPLastStep, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

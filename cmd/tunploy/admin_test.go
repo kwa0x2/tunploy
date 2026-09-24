@@ -75,3 +75,28 @@ func TestResetPassword(t *testing.T) {
 		t.Fatalf("sessions must be signed out, got %v", err)
 	}
 }
+
+func TestDisableTOTP(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	user, err := createAdmin(ctx, st, "Kwa", "admin@example.com", "hunter2hunter2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := disableTOTP(ctx, st, "admin@example.com"); err == nil {
+		t.Fatal("disabling 2FA that is off must say so")
+	}
+	if err := st.EnableTOTP(ctx, user.ID, "SECRET", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := disableTOTP(ctx, st, "nobody@example.com"); err == nil {
+		t.Fatal("unknown email must fail")
+	}
+	if err := disableTOTP(ctx, st, "ADMIN@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.UserByID(ctx, user.ID); got.TOTPSecret != "" {
+		t.Fatal("secret survived disable-2fa")
+	}
+}

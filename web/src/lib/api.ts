@@ -33,6 +33,7 @@ export interface User {
   id: number
   name: string
   email: string
+  totp_enabled: boolean
   created_at: string
 }
 
@@ -43,6 +44,12 @@ export interface SetupStatus {
 export interface Credentials {
   email: string
   password: string
+  code?: string
+}
+
+export interface TOTPSetup {
+  secret: string
+  uri: string
 }
 
 export type InstanceState = "running" | "restarting" | "stopped" | "not_deployed" | "unknown"
@@ -125,6 +132,18 @@ export interface Settings {
   public_host: string
   default_dns: string[]
   public_host_env: string
+}
+
+export type DomainState = "off" | "pending" | "ready" | "failed"
+
+export interface DomainStatus {
+  enabled: boolean
+  domain: string
+  email: string
+  state: DomainState
+  expires?: string
+  error?: string
+  checked_at?: string
 }
 
 export type SettingsInput = Partial<Pick<Settings, "public_host" | "default_dns">>
@@ -277,9 +296,19 @@ export const api = {
   logout: () => post<void>("/api/auth/logout"),
   me: () => request<User>("/api/auth/me"),
   changePassword: (change: PasswordChange) => post<void>("/api/auth/password", change),
+  totpSetup: () => post<TOTPSetup>("/api/auth/totp/setup"),
+  totpEnable: (input: { secret: string; code: string; password: string }) =>
+    post<User>("/api/auth/totp/enable", input),
+  totpDisable: (input: { code: string; password: string }) =>
+    post<User>("/api/auth/totp/disable", input),
 
   settings: () => request<Settings>("/api/settings"),
   updateSettings: (input: SettingsInput) => patch<Settings>("/api/settings", input),
+  domain: () => request<DomainStatus>("/api/settings/domain"),
+  setDomain: (input: { domain: string; email: string }) =>
+    request<DomainStatus>("/api/settings/domain", { method: "PUT", body: JSON.stringify(input) }),
+  retryDomain: () => post<DomainStatus>("/api/settings/domain/retry"),
+  httpsUrl: () => request<{ url?: string }>("/api/https").then((r) => r.url ?? ""),
 
   dockerStatus: () => request<DockerStatus>("/api/system/docker"),
   events: (opts: { limit: number; category?: EventCategory }) =>

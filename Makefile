@@ -6,7 +6,9 @@ VERSION    ?= dev
 DATA_DIR   ?= ./data
 PORT       ?= 3000
 
-GO_ENV := TUNPLOY_DATA_DIR=$(DATA_DIR) TUNPLOY_LISTEN=127.0.0.1:$(PORT)
+# HTTPS on high ports: no root needed, and nothing else on the laptop is in the way.
+GO_ENV := TUNPLOY_DATA_DIR=$(DATA_DIR) TUNPLOY_LISTEN=127.0.0.1:$(PORT) \
+	TUNPLOY_HTTPS_LISTEN=127.0.0.1:8443 TUNPLOY_HTTP_LISTEN=127.0.0.1:8080
 
 .PHONY: help all dev api run admin build web docker test lint fmt reset clean
 

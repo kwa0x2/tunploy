@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/geoip"
 	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
+	"github.com/kwa0x2/tunploy/internal/tlscert"
 )
 
 // version is stamped at build time with -ldflags.
@@ -76,7 +78,11 @@ func run() error {
 		go geo.Run(ctx)
 	}
 
-	handler := server.New(cfg, st, dk, mgr, geo)
+	certs := tlscert.New(filepath.Join(cfg.DataDir, "certs"), cfg.ACMEDirectory, cfg.HTTPSListen)
+	if cfg.HTTPSListen == "" {
+		certs.Disable("HTTPS is turned off with TUNPLOY_HTTPS=false")
+	}
+	handler := server.New(cfg, st, dk, mgr, geo, certs)
 
 	if logDockerStatus(ctx, dk) {
 		go reconcile(ctx, mgr)
@@ -84,21 +90,24 @@ func run() error {
 	go mgr.Watch(ctx, peerWatchInterval)
 	go housekeeping(ctx, st)
 
-	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
-	srv.RegisterOnShutdown(handler.Close)
+	panel := newHTTPServer(cfg.Listen, handler)
+	panel.RegisterOnShutdown(handler.Close)
+	servers := []*http.Server{panel}
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("http server listening", "addr", cfg.Listen)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Info("listening", "addr", panel.Addr)
+		if err := panel.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- fmt.Errorf("http server: %w", err)
 		}
 	}()
+
+	if cfg.HTTPSListen != "" {
+		servers = append(servers, serveHTTPS(cfg, handler, certs)...)
+		if err := handler.RestoreDomain(ctx); err != nil {
+			slog.Error("restore panel domain", "error", err)
+		}
+	}
 
 	select {
 	case err := <-errCh:
@@ -109,11 +118,49 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("graceful shutdown: %w", err)
+	for _, srv := range servers {
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("graceful shutdown: %w", err)
+		}
 	}
 	slog.Info("tunploy stopped cleanly")
 	return nil
+}
+
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
+// Not fatal: the panel on its own port still works without HTTPS.
+func serveHTTPS(cfg config.Config, h http.Handler, certs *tlscert.Manager) []*http.Server {
+	secure := newHTTPServer(cfg.HTTPSListen, h)
+	secure.TLSConfig = certs.TLSConfig()
+	plain := newHTTPServer(cfg.HTTPListen, certs.HTTPHandler())
+
+	for _, srv := range []*http.Server{secure, plain} {
+		ln, err := net.Listen("tcp", srv.Addr)
+		if err != nil {
+			slog.Warn("https is unavailable", "addr", srv.Addr, "error", err)
+			certs.Disable(fmt.Sprintf("could not listen on %s: %v", srv.Addr, err))
+			continue
+		}
+		slog.Info("listening", "addr", srv.Addr, "tls", srv.TLSConfig != nil)
+		go func() {
+			serve := srv.Serve
+			if srv.TLSConfig != nil {
+				serve = func(ln net.Listener) error { return srv.ServeTLS(ln, "", "") }
+			}
+			if err := serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("https listener stopped", "addr", srv.Addr, "error", err)
+			}
+		}()
+	}
+	return []*http.Server{secure, plain}
 }
 
 // Not fatal: the panel must come up to show what is wrong.

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react"
 import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import {
+  Globe,
   KeyRound,
   Pencil,
   Plug,
@@ -11,6 +12,8 @@ import {
   RotateCw,
   Settings,
   ShieldAlert,
+  ShieldCheck,
+  ShieldOff,
   Square,
   Trash2,
   TriangleAlert,
@@ -183,12 +186,18 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: RotateCw, tone: "neutral", text: <>Server {server} restarted</> }
     case "settings.updated":
       return { icon: Settings, tone: "neutral", text: "Panel settings changed" }
+    case "settings.domain_changed":
+      return { icon: Globe, tone: "neutral", text: e.detail ? "Panel domain set" : "Panel domain removed" }
     case "auth.login":
       return { icon: KeyRound, tone: "good", text: "Signed in" }
     case "auth.login_failed":
       return { icon: ShieldAlert, tone: "bad", text: "Failed sign-in attempt" }
     case "auth.password_changed":
       return { icon: KeyRound, tone: "neutral", text: "Password changed" }
+    case "auth.totp_enabled":
+      return { icon: ShieldCheck, tone: "good", text: "Two-factor authentication turned on" }
+    case "auth.totp_disabled":
+      return { icon: ShieldOff, tone: "bad", text: "Two-factor authentication turned off" }
     default:
       return { icon: Settings, tone: "neutral", text: e.kind }
   }

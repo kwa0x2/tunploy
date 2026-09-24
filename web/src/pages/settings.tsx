@@ -15,7 +15,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FormField } from "@/components/form-field"
+import { DomainCard } from "@/components/domain-card"
 import { PageHeader } from "@/components/page-header"
+import { SecurityCard } from "@/components/security-card"
 import { useResource } from "@/hooks/use-resource"
 import { ApiError, api } from "@/lib/api"
 import type { Settings } from "@/lib/api"
@@ -24,10 +26,18 @@ import { errorMessage } from "@/lib/format"
 
 export function SettingsPage() {
   const settings = useResource(useCallback(() => api.settings(), []))
+  const domain = useResource(useCallback(() => api.domain(), []))
+  const httpsUrl = useResource(useCallback(() => api.httpsUrl(), []))
+  const { reload: reloadStatus } = domain
+  const { reload: reloadUrl } = httpsUrl
+  const reloadDomain = useCallback(() => {
+    void reloadStatus()
+    void reloadUrl()
+  }, [reloadStatus, reloadUrl])
 
   return (
     <>
-      <PageHeader title="Settings" description="Panel defaults and your account." />
+      <PageHeader title="Settings" description="Panel defaults, domain, security and your account." />
       <div className="grid max-w-2xl gap-6">
         {settings.data ? (
           <DefaultsCard settings={settings.data} onSaved={() => void settings.reload()} />
@@ -38,6 +48,17 @@ export function SettingsPage() {
         ) : (
           <Skeleton className="h-72 rounded-xl" />
         )}
+        {domain.data ? (
+          <DomainCard
+            status={domain.data}
+            serverAddress={settings.data?.public_host || settings.data?.public_host_env || ""}
+            httpsUrl={httpsUrl.data ?? ""}
+            onChange={reloadDomain}
+          />
+        ) : (
+          domain.error === undefined && <Skeleton className="h-80 rounded-xl" />
+        )}
+        <SecurityCard httpsUrl={httpsUrl.data ?? ""} />
         <AccountCard />
       </div>
     </>

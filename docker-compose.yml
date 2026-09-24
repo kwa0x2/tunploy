@@ -6,6 +6,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+      # HTTPS once a domain is set under Settings.
+      - "80:80"
+      - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Same path on both sides: Tunploy hands directories under its data dir

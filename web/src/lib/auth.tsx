@@ -11,6 +11,7 @@ interface AuthState {
   recheck: () => Promise<void>
   login: (creds: Credentials) => Promise<void>
   logout: () => Promise<void>
+  setUser: (user: User) => void
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -58,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null)
         setStatus("anonymous")
       },
+      setUser,
     }),
     [status, user, bootstrap],
   )

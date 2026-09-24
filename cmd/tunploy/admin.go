@@ -24,6 +24,7 @@ const adminUsage = `usage: tunploy admin <command> [flags]
 commands:
   create           create the admin account; only works while there is none
   reset-password   set a new password and sign out every session
+  disable-2fa      turn off two-factor authentication, for a lost phone
 
 The password is read from the terminal without echo, or as one line from
 stdin when it is piped in. Run it inside the container:
@@ -50,6 +51,8 @@ func runAdmin(args []string) int {
 		err = adminCreate(args[1:], p)
 	case "reset-password":
 		err = adminResetPassword(args[1:], p)
+	case "disable-2fa":
+		err = adminDisableTOTP(args[1:], p)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], adminUsage)
 		return 2
@@ -138,6 +141,31 @@ func adminResetPassword(args []string, p *prompter) error {
 	return nil
 }
 
+func adminDisableTOTP(args []string, p *prompter) error {
+	fs := flag.NewFlagSet("tunploy admin disable-2fa", flag.ContinueOnError)
+	email := fs.String("email", "", "email of the account")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	if *email == "" {
+		if *email, err = p.line("Email: "); err != nil {
+			return err
+		}
+	}
+	if err := disableTOTP(context.Background(), st, *email); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "Two-factor authentication is off. Sign in with just the password and set it up again under Settings.")
+	return nil
+}
+
 func createAdmin(ctx context.Context, st *store.Store, name, email, password string) (*store.User, error) {
 	if err := fieldsError(auth.ValidateAccount(name, email, password)); err != nil {
 		return nil, err
@@ -157,10 +185,7 @@ func resetPassword(ctx context.Context, st *store.Store, email, password string)
 	if msg := auth.CheckPassword(password); msg != "" {
 		return errors.New(msg)
 	}
-	user, err := st.UserByEmail(ctx, email)
-	if errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("no account uses %s", store.NormalizeEmail(email))
-	}
+	user, err := userByEmail(ctx, st, email)
 	if err != nil {
 		return err
 	}
@@ -172,6 +197,25 @@ func resetPassword(ctx context.Context, st *store.Store, email, password string)
 		return err
 	}
 	return st.DeleteUserSessions(ctx, user.ID)
+}
+
+func disableTOTP(ctx context.Context, st *store.Store, email string) error {
+	user, err := userByEmail(ctx, st, email)
+	if err != nil {
+		return err
+	}
+	if user.TOTPSecret == "" {
+		return errors.New("two-factor authentication is not on for this account")
+	}
+	return st.DisableTOTP(ctx, user.ID)
+}
+
+func userByEmail(ctx context.Context, st *store.Store, email string) (*store.User, error) {
+	user, err := st.UserByEmail(ctx, email)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("no account uses %s", store.NormalizeEmail(email))
+	}
+	return user, err
 }
 
 func fieldsError(fields map[string]string) error {

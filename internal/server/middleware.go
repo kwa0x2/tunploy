@@ -56,6 +56,7 @@ func logRequests(next http.Handler) http.Handler {
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
+			"ip", clientIP(r),
 			"duration", time.Since(start).Round(time.Millisecond).String(),
 		)
 	})

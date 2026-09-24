@@ -1,10 +1,11 @@
 package server
 
 import (
+	"context"
 	"errors"
-	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/auth"
@@ -17,17 +18,19 @@ const sessionCookie = "tunploy_session"
 type credentials struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Code     string `json:"code"`
 }
 
 type userResponse struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Email       string    `json:"email"`
+	TOTPEnabled bool      `json:"totp_enabled"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func newUserResponse(u *store.User) userResponse {
-	return userResponse{ID: u.ID, Name: u.Name, Email: u.Email, CreatedAt: u.CreatedAt}
+	return userResponse{ID: u.ID, Name: u.Name, Email: u.Email, TOTPEnabled: u.TOTPSecret != "", CreatedAt: u.CreatedAt}
 }
 
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) error {
@@ -46,31 +49,47 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 
 	email := store.NormalizeEmail(req.Email)
 	key := email + "|" + clientIP(r)
-	if ok, retryIn := s.loginThrottle.Allowed(key); !ok {
-		w.Header().Set("Retry-After", retryAfterSeconds(retryIn))
-		return httpx.Errorf(http.StatusTooManyRequests, "too_many_attempts",
-			"too many failed attempts, try again in %s", retryIn.Round(time.Second))
+	if err := s.checkThrottle(w, key); err != nil {
+		return err
 	}
+	failed := func(detail string) {
+		s.loginThrottle.Fail(key)
+		s.record(r.Context(), store.Event{Kind: "auth.login_failed", IP: clientIP(r), Detail: detail})
+	}
+	badPassword := httpx.Unauthorized("email or password is incorrect")
 
 	user, err := s.store.UserByEmail(r.Context(), email)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			// Same work as a real check, so timing can't reveal the account.
 			auth.VerifyPassword(auth.DummyHash, req.Password)
-			s.loginThrottle.Fail(key)
-			s.record(r.Context(), store.Event{Kind: "auth.login_failed", IP: clientIP(r), Detail: email})
-			return httpx.Unauthorized("email or password is incorrect")
+			failed(email)
+			return badPassword
 		}
 		return err
 	}
 
 	if err := auth.VerifyPassword(user.PasswordHash, req.Password); err != nil {
 		if errors.Is(err, auth.ErrPasswordMismatch) {
-			s.loginThrottle.Fail(key)
-			s.record(r.Context(), store.Event{Kind: "auth.login_failed", IP: clientIP(r), Detail: email})
-			return httpx.Unauthorized("email or password is incorrect")
+			failed(email)
+			return badPassword
 		}
 		return err
+	}
+
+	// Asked for only after the password, so it reveals nothing to a guesser.
+	if user.TOTPSecret != "" {
+		if strings.TrimSpace(req.Code) == "" {
+			return httpx.Errorf(http.StatusUnauthorized, "totp_required", "enter the code from your authenticator app")
+		}
+		ok, err := s.checkTOTP(r.Context(), user, req.Code)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			failed(email + ", wrong authentication code")
+			return httpx.Errorf(http.StatusUnauthorized, "totp_invalid", "the authentication code is incorrect")
+		}
 	}
 
 	s.loginThrottle.Reset(key)
@@ -81,13 +100,55 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	return httpx.JSON(w, http.StatusOK, newUserResponse(user))
 }
 
+func (s *Server) checkTOTP(ctx context.Context, user *store.User, code string) (bool, error) {
+	step, ok := auth.VerifyTOTP(user.TOTPSecret, code, time.Now(), user.TOTPLastStep)
+	if !ok {
+		return false, nil
+	}
+	return s.store.ClaimTOTPStep(ctx, user.ID, step)
+}
+
+func (s *Server) checkThrottle(w http.ResponseWriter, key string) error {
+	if ok, retryIn := s.loginThrottle.Allowed(key); !ok {
+		w.Header().Set("Retry-After", retryAfterSeconds(retryIn))
+		return httpx.Errorf(http.StatusTooManyRequests, "too_many_attempts",
+			"too many failed attempts, try again in %s", retryIn.Round(time.Second))
+	}
+	return nil
+}
+
+// Shares the login budget, so a hijacked session can't guess the password freely.
+func (s *Server) reauthenticate(w http.ResponseWriter, r *http.Request, field, password string) (*store.User, string, error) {
+	id, ok := auth.IdentityFrom(r.Context())
+	if !ok {
+		return nil, "", httpx.Unauthorized("not signed in")
+	}
+	key := id.Email + "|" + clientIP(r)
+	if err := s.checkThrottle(w, key); err != nil {
+		return nil, "", err
+	}
+
+	user, err := s.store.UserByID(r.Context(), id.UserID)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := auth.VerifyPassword(user.PasswordHash, password); err != nil {
+		if errors.Is(err, auth.ErrPasswordMismatch) {
+			s.loginThrottle.Fail(key)
+			return nil, "", httpx.Invalid(map[string]string{field: "current password is incorrect"})
+		}
+		return nil, "", err
+	}
+	return user, key, nil
+}
+
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) error {
 	if id, ok := auth.IdentityFrom(r.Context()); ok {
 		if err := s.store.DeleteSession(r.Context(), id.TokenHash); err != nil {
 			return err
 		}
 	}
-	s.clearSessionCookie(w)
+	s.clearSessionCookie(w, r)
 	return httpx.NoContent(w)
 }
 
@@ -110,10 +171,6 @@ type passwordChange struct {
 
 // A fresh token, so a stolen cookie dies with the old password.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) error {
-	id, ok := auth.IdentityFrom(r.Context())
-	if !ok {
-		return httpx.Unauthorized("not signed in")
-	}
 	var req passwordChange
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
@@ -122,23 +179,8 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 		return httpx.Invalid(map[string]string{"new_password": msg})
 	}
 
-	// Shares the login budget so a hijacked session can't guess freely.
-	key := id.Email + "|" + clientIP(r)
-	if ok, retryIn := s.loginThrottle.Allowed(key); !ok {
-		w.Header().Set("Retry-After", retryAfterSeconds(retryIn))
-		return httpx.Errorf(http.StatusTooManyRequests, "too_many_attempts",
-			"too many failed attempts, try again in %s", retryIn.Round(time.Second))
-	}
-
-	user, err := s.store.UserByID(r.Context(), id.UserID)
+	user, key, err := s.reauthenticate(w, r, "current_password", req.CurrentPassword)
 	if err != nil {
-		return err
-	}
-	if err := auth.VerifyPassword(user.PasswordHash, req.CurrentPassword); err != nil {
-		if errors.Is(err, auth.ErrPasswordMismatch) {
-			s.loginThrottle.Fail(key)
-			return httpx.Invalid(map[string]string{"current_password": "current password is incorrect"})
-		}
 		return err
 	}
 	s.loginThrottle.Reset(key)
@@ -150,14 +192,19 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 	if err := s.store.UpdateUserPassword(r.Context(), user.ID, hash); err != nil {
 		return err
 	}
-	if err := s.store.DeleteUserSessions(r.Context(), user.ID); err != nil {
-		return err
-	}
-	if err := s.startSession(w, r, user); err != nil {
+	if err := s.restartSessions(w, r, user); err != nil {
 		return err
 	}
 	s.record(r.Context(), store.Event{Kind: "auth.password_changed", IP: clientIP(r)})
 	return httpx.NoContent(w)
+}
+
+// Signs out every other device and hands this one a fresh token.
+func (s *Server) restartSessions(w http.ResponseWriter, r *http.Request, user *store.User) error {
+	if err := s.store.DeleteUserSessions(r.Context(), user.ID); err != nil {
+		return err
+	}
+	return s.startSession(w, r, user)
 }
 
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *store.User) error {
@@ -179,20 +226,20 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *stor
 		Expires:  expiresAt,
 		MaxAge:   int(s.cfg.SessionTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   s.cfg.SecureCookies,
+		Secure:   s.secureCookies(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	return nil
 }
 
-func (s *Server) clearSessionCookie(w http.ResponseWriter) {
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   s.cfg.SecureCookies,
+		Secure:   s.secureCookies(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -209,7 +256,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 		user, err := s.store.UserBySessionToken(r.Context(), hash)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
-				s.clearSessionCookie(w)
+				s.clearSessionCookie(w, r)
 				httpx.WriteError(w, r, httpx.Unauthorized("session is no longer valid"))
 				return
 			}
@@ -224,14 +271,6 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func retryAfterSeconds(d time.Duration) string {

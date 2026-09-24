@@ -108,3 +108,39 @@ func TestUserLookupsReportMissingRows(t *testing.T) {
 		t.Errorf("UserByID: want ErrNotFound, got %v", err)
 	}
 }
+
+func TestTOTPStepIsClaimedOnce(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	u, err := st.CreateFirstUser(ctx, "Admin", "admin@example.com", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EnableTOTP(ctx, u.ID, "SECRET", 100); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []struct {
+		step int64
+		want bool
+	}{{100, false}, {101, true}, {101, false}, {99, false}, {103, true}} {
+		ok, err := st.ClaimTOTPStep(ctx, u.ID, c.step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok != c.want {
+			t.Errorf("claim step %d: got %v, want %v", c.step, ok, c.want)
+		}
+	}
+
+	if err := st.DisableTOTP(ctx, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.UserByID(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TOTPSecret != "" || got.TOTPLastStep != 0 {
+		t.Fatalf("disable left %q / %d behind", got.TOTPSecret, got.TOTPLastStep)
+	}
+}
