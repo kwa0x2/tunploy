@@ -1,0 +1,8 @@
+.git
+.claude
+bin
+data
+web/node_modules
+internal/web/dist
+Dockerfile
+docker-compose.yml

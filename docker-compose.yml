@@ -1,0 +1,14 @@
+services:
+  tunploy:
+    build: .
+    image: tunploy:latest
+    container_name: tunploy
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path on both sides: Tunploy hands directories under its data dir
+      # to the VPN containers it starts, and the daemon resolves those paths
+      # on the host, not inside this container.
+      - /var/lib/tunploy:/var/lib/tunploy
