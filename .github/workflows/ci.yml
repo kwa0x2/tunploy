@@ -30,11 +30,13 @@ jobs:
         working-directory: web
       - name: Lint
         run: make lint
+      # Type-checks too, and the embed tests need the built UI.
+      - name: Build UI
+        run: npm run build
+        working-directory: web
       # -short skips the tests that bring up real WireGuard containers.
       - name: Test
-        run: |
-          go test -race -short ./...
-          cd web && npx tsc -b
+        run: go test -race -short ./...
 
   image:
     needs: test
