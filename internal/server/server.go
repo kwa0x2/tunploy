@@ -57,7 +57,6 @@ func (s *Server) routes() http.Handler {
 
 	mux.Handle("GET /api/health", httpx.Handler(s.handleHealth))
 	mux.Handle("GET /api/setup", httpx.Handler(s.handleSetupStatus))
-	mux.Handle("POST /api/setup", httpx.Handler(s.handleSetup))
 	mux.Handle("POST /api/auth/login", httpx.Handler(s.handleLogin))
 
 	private := http.NewServeMux()

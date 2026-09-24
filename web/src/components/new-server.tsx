@@ -27,8 +27,8 @@ export function EmptyServers({ onCreate }: { onCreate: () => void }) {
   return (
     <Card>
       <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
-        <div className="bg-muted grid size-12 place-items-center rounded-full">
-          <Server className="text-muted-foreground size-5" />
+        <div className="grid size-14 place-items-center rounded-2xl bg-linear-to-br from-indigo-500 via-violet-500 to-sky-500 text-white shadow-lg shadow-indigo-500/25">
+          <Server className="size-6" />
         </div>
         <div className="space-y-1">
           <p className="font-medium">No VPN server yet</p>

@@ -20,9 +20,13 @@ The script:
 2. Checks that the WireGuard kernel module can load.
 3. Detects the server's public IPv4 address, which VPN clients will connect to.
 4. Pulls `ghcr.io/kwa0x2/tunploy:latest` and starts it with its data in `/var/lib/tunploy`.
-5. Waits until the panel answers, then prints how to reach it.
+5. Waits until the panel answers.
+6. Asks for your name, email and password and creates the admin account.
+7. Prints how to reach the panel.
 
-To upgrade later, run the same command again. It pulls the newest image and replaces the container; your servers, peers and account stay in `/var/lib/tunploy`.
+The panel has no sign-up page. The admin account can only be created on the server, so nobody who stumbles on the panel can claim it.
+
+To upgrade later, run the same command again. It pulls the newest image and replaces the container; your servers, peers and account stay in `/var/lib/tunploy`, and it does not ask for an account again.
 
 ### Options
 
@@ -40,10 +44,11 @@ curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh \
 | `TUNPLOY_PORT` | `3000` | Panel port. |
 | `TUNPLOY_VERSION` | `latest` | Image tag, for example `0.1.0` or `edge`. |
 | `TUNPLOY_IMAGE` | `ghcr.io/kwa0x2/tunploy` | Image to install, for forks and mirrors. |
+| `TUNPLOY_ADMIN_NAME`, `TUNPLOY_ADMIN_EMAIL`, `TUNPLOY_ADMIN_PASSWORD` | asked | Create the admin account without prompting, for automated installs. |
 
-## First sign-in over an SSH tunnel
+## Sign in over an SSH tunnel
 
-By default the panel listens only on the server itself. This matters: **the first person to open a fresh panel becomes its admin**, and the panel serves plain HTTP. Reach it through SSH instead, which encrypts the connection and keeps everyone else out.
+By default the panel listens only on the server itself, because it serves plain HTTP: over the internet, your password and session would travel unencrypted. Reach it through SSH instead, which encrypts the connection.
 
 On your own computer:
 
@@ -51,9 +56,23 @@ On your own computer:
 ssh -L 3000:localhost:3000 root@YOUR_SERVER_IP
 ```
 
-Leave that terminal open, browse to <http://localhost:3000> and create the admin account.
+Leave that terminal open, browse to <http://localhost:3000> and sign in with the account you created during the install.
 
-If you set `TUNPLOY_BIND=0.0.0.0`, create the admin account right after installing, before anyone else finds the port. For anything beyond a quick test, put the panel behind a reverse proxy with HTTPS and set `TUNPLOY_SECURE_COOKIES=true`.
+With `TUNPLOY_BIND=0.0.0.0` the panel is reachable at `http://YOUR_SERVER_IP:3000`. That is fine for a quick test from a trusted network; for anything longer, put it behind a reverse proxy with HTTPS and set `TUNPLOY_SECURE_COOKIES=true`.
+
+## Manage the admin account
+
+These run inside the panel's container and ask for the password without echoing it:
+
+```sh
+# Create the admin, if the install could not ask (for example, no terminal)
+docker exec -it tunploy tunploy admin create
+
+# Forgot the password: set a new one and sign out every session
+docker exec -it tunploy tunploy admin reset-password --email you@example.com
+```
+
+Once signed in, you can also change the password under **Settings**.
 
 ## Open the WireGuard port
 
@@ -89,6 +108,7 @@ services:
 
 ```sh
 docker compose up -d
+docker exec -it tunploy tunploy admin create
 ```
 
 ## Configuration
@@ -112,4 +132,4 @@ docker compose up -d
 
 **Connected, but no internet.** Check that the server itself has outbound connectivity, and that no host firewall rule drops forwarded traffic.
 
-**Forgot the admin password.** Stop the panel and remove the database: `docker rm -f tunploy && sudo rm /var/lib/tunploy/tunploy.db`, then run the installer again. This deletes all servers and peers; their containers are removed on the next start.
+**Forgot the admin password.** Run `docker exec -it tunploy tunploy admin reset-password --email you@example.com` on the server. Servers and peers are not affected.

@@ -8,7 +8,7 @@ PORT       ?= 3000
 
 GO_ENV := TUNPLOY_DATA_DIR=$(DATA_DIR) TUNPLOY_LISTEN=127.0.0.1:$(PORT)
 
-.PHONY: help all dev api run build web docker test lint fmt reset clean
+.PHONY: help all dev api run admin build web docker test lint fmt reset clean
 
 help:
 	@echo "Tunploy"
@@ -16,11 +16,12 @@ help:
 	@echo "  make dev     API + Vite dev server together, hot reload (http://localhost:5173)"
 	@echo "  make api     Go API only, for use with your own frontend server"
 	@echo "  make run     Full stack from the embedded UI (http://127.0.0.1:$(PORT))"
+	@echo "  make admin   Create the admin account in $(DATA_DIR)"
 	@echo "  make build   Compile the frontend into $(BINARY)"
 	@echo "  make docker  Build the tunploy:$(VERSION) container image"
 	@echo "  make test    Go tests plus a TypeScript type check"
 	@echo "  make lint    go vet, gofmt and oxlint"
-	@echo "  make reset   Delete $(DATA_DIR), so setup starts over"
+	@echo "  make reset   Delete $(DATA_DIR), so you start without an account"
 	@echo "  make clean   Remove build output"
 
 all: build
@@ -39,6 +40,9 @@ api:
 
 run: web
 	$(GO_ENV) go run ./cmd/tunploy
+
+admin:
+	$(GO_ENV) go run ./cmd/tunploy admin create
 
 build: web
 	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/tunploy

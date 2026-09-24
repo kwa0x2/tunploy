@@ -34,10 +34,6 @@ export interface Credentials {
   password: string
 }
 
-export interface Registration extends Credentials {
-  name: string
-}
-
 export type InstanceState = "running" | "restarting" | "stopped" | "not_deployed" | "unknown"
 
 export interface InstanceSettings {
@@ -195,7 +191,6 @@ async function streamText(path: string, onChunk: (text: string) => void, signal:
 
 export const api = {
   setupStatus: () => request<SetupStatus>("/api/setup"),
-  setup: (reg: Registration) => post<User>("/api/setup", reg),
   login: (creds: Credentials) => post<User>("/api/auth/login", creds),
   logout: () => post<void>("/api/auth/logout"),
   me: () => request<User>("/api/auth/me"),

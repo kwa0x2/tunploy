@@ -1,14 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { ApiError, api } from "@/lib/api"
-import type { Credentials, Registration, User } from "@/lib/api"
+import type { Credentials, User } from "@/lib/api"
 
 type Status = "loading" | "setup-required" | "anonymous" | "authenticated"
 
 interface AuthState {
   status: Status
   user: User | null
-  setup: (reg: Registration) => Promise<void>
+  recheck: () => Promise<void>
   login: (creds: Credentials) => Promise<void>
   logout: () => Promise<void>
 }
@@ -48,10 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       status,
       user,
-      setup: async (reg) => {
-        setUser(await api.setup(reg))
-        setStatus("authenticated")
-      },
+      recheck: bootstrap,
       login: async (creds) => {
         setUser(await api.login(creds))
         setStatus("authenticated")
@@ -62,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus("anonymous")
       },
     }),
-    [status, user],
+    [status, user, bootstrap],
   )
 
   return <AuthContext value={value}>{children}</AuthContext>

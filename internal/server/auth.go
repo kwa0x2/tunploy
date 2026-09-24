@@ -4,9 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/mail"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/auth"
@@ -14,20 +12,9 @@ import (
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
-const (
-	sessionCookie     = "tunploy_session"
-	minPasswordLength = 8
-	maxPasswordLength = 256
-	maxNameLength     = 80
-)
+const sessionCookie = "tunploy_session"
 
 type credentials struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type registration struct {
-	Name     string `json:"name"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
@@ -43,42 +30,14 @@ func newUserResponse(u *store.User) userResponse {
 	return userResponse{ID: u.ID, Name: u.Name, Email: u.Email, CreatedAt: u.CreatedAt}
 }
 
+// handleSetupStatus lets the UI explain that the admin account is created
+// on the server, since the panel itself never offers a sign-up form.
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) error {
 	n, err := s.store.CountUsers(r.Context())
 	if err != nil {
 		return err
 	}
 	return httpx.JSON(w, http.StatusOK, map[string]bool{"setup_required": n == 0})
-}
-
-// handleSetup creates the first administrator. It stays open only while the
-// panel has no users at all.
-func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) error {
-	var req registration
-	if err := httpx.Decode(r, &req); err != nil {
-		return err
-	}
-	if err := validateRegistration(req); err != nil {
-		return err
-	}
-
-	hash, err := auth.HashPassword(req.Password)
-	if err != nil {
-		return err
-	}
-
-	user, err := s.store.CreateFirstUser(r.Context(), strings.TrimSpace(req.Name), req.Email, hash)
-	if err != nil {
-		if errors.Is(err, store.ErrDuplicate) {
-			return httpx.Conflict("setup has already been completed")
-		}
-		return err
-	}
-
-	if err := s.startSession(w, r, user); err != nil {
-		return err
-	}
-	return httpx.JSON(w, http.StatusCreated, newUserResponse(user))
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
@@ -160,7 +119,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-	if msg := checkPassword(req.NewPassword); msg != "" {
+	if msg := auth.CheckPassword(req.NewPassword); msg != "" {
 		return httpx.Invalid(map[string]string{"new_password": msg})
 	}
 
@@ -268,50 +227,6 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func validateRegistration(r registration) error {
-	fields := validateCredentialFields(credentials{Email: r.Email, Password: r.Password})
-
-	switch name := strings.TrimSpace(r.Name); {
-	case name == "":
-		fields["name"] = "name is required"
-	case len(name) > maxNameLength:
-		fields["name"] = "name must be at most 80 characters"
-	}
-
-	if len(fields) > 0 {
-		return httpx.Invalid(fields)
-	}
-	return nil
-}
-
-func validateCredentialFields(c credentials) map[string]string {
-	fields := map[string]string{}
-
-	email := store.NormalizeEmail(c.Email)
-	if email == "" {
-		fields["email"] = "email is required"
-	} else if _, err := mail.ParseAddress(email); err != nil {
-		fields["email"] = "email is not a valid address"
-	}
-
-	if msg := checkPassword(c.Password); msg != "" {
-		fields["password"] = msg
-	}
-	return fields
-}
-
-func checkPassword(p string) string {
-	switch {
-	case p == "":
-		return "password is required"
-	case len(p) < minPasswordLength:
-		return "password must be at least 8 characters"
-	case len(p) > maxPasswordLength:
-		return "password must be at most 256 characters"
-	}
-	return ""
 }
 
 func clientIP(r *http.Request) string {

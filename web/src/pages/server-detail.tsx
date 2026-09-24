@@ -43,7 +43,7 @@ import { InstanceFormDialog } from "@/components/instance-form-dialog"
 import { LogsDialog } from "@/components/logs-dialog"
 import { PageHeader } from "@/components/page-header"
 import { PeerConfigDialog, PeerNameDialog } from "@/components/peer-dialogs"
-import { InstanceStatus, PeerStatus, PeerTraffic } from "@/components/status"
+import { DeviceIcon, InstanceStatus, PeerStatus, PeerTraffic } from "@/components/status"
 import { useNow } from "@/hooks/use-now"
 import { useResource } from "@/hooks/use-resource"
 import { useTarget } from "@/hooks/use-target"
@@ -363,7 +363,12 @@ function PeersCard({ instance, peers, error, reload }: {
                 const handshake = peer.stats?.latest_handshake
                 return (
                   <TableRow key={peer.id}>
-                    <TableCell className="max-w-48 truncate font-medium">{peer.name}</TableCell>
+                    <TableCell className="max-w-48 font-medium">
+                      <span className="flex items-center gap-2.5">
+                        <DeviceIcon />
+                        <span className="truncate">{peer.name}</span>
+                      </span>
+                    </TableCell>
                     <TableCell className="font-mono text-xs">{peer.address}</TableCell>
                     <TableCell>
                       <PeerStatus

@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { PageHeader } from "@/components/page-header"
-import { PeerStatus, PeerTraffic } from "@/components/status"
+import { DeviceIcon, PeerStatus, PeerTraffic } from "@/components/status"
 import { useNow } from "@/hooks/use-now"
 import { useResource } from "@/hooks/use-resource"
 import { loadFleet } from "@/lib/fleet"
@@ -65,7 +65,12 @@ export function PeersPage() {
                     const handshake = peer.stats?.latest_handshake
                     return (
                       <TableRow key={peer.id}>
-                        <TableCell className="max-w-48 truncate font-medium">{peer.name}</TableCell>
+                        <TableCell className="max-w-48 font-medium">
+                          <span className="flex items-center gap-2.5">
+                            <DeviceIcon />
+                            <span className="truncate">{peer.name}</span>
+                          </span>
+                        </TableCell>
                         <TableCell>
                           <Link
                             to={`/servers/${peer.instance.id}`}

@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 import { Loader2 } from "lucide-react"
 import { Toaster } from "@/components/ui/sonner"
 import { AppShell } from "@/components/layout/app-shell"
+import { AdminMissingPage } from "@/pages/admin-missing"
 import { LoginPage } from "@/pages/login"
 import { NotFoundPage } from "@/pages/not-found"
 import { OverviewPage } from "@/pages/overview"
@@ -9,7 +10,6 @@ import { PeersPage } from "@/pages/peers"
 import { ServerDetailPage } from "@/pages/server-detail"
 import { ServersPage } from "@/pages/servers"
 import { SettingsPage } from "@/pages/settings"
-import { SetupPage } from "@/pages/setup"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { ThemeProvider } from "@/lib/theme"
 
@@ -27,8 +27,7 @@ function Routing() {
   if (status === "setup-required") {
     return (
       <Routes>
-        <Route path="/setup" element={<SetupPage />} />
-        <Route path="*" element={<Navigate to="/setup" replace />} />
+        <Route path="*" element={<AdminMissingPage />} />
       </Routes>
     )
   }
@@ -52,7 +51,6 @@ function Routing() {
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="/login" element={<Navigate to="/" replace />} />
-      <Route path="/setup" element={<Navigate to="/" replace />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   )

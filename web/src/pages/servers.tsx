@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { Plus } from "lucide-react"
+import { Plus, Server } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -64,9 +64,14 @@ export function ServersPage() {
 function ServerCard({ instance }: { instance: Instance }) {
   return (
     <Link to={`/servers/${instance.id}`} className="group rounded-xl outline-none">
-      <Card className="group-hover:ring-foreground/20 group-focus-visible:ring-ring h-full transition-shadow">
-        <CardHeader className="flex flex-row items-start justify-between gap-2">
-          <CardTitle className="truncate">{instance.name}</CardTitle>
+      <Card className="group-hover:ring-primary/30 group-focus-visible:ring-ring h-full transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-indigo-500/10 motion-reduce:transform-none">
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="bg-primary/10 text-primary grid size-9 shrink-0 place-items-center rounded-lg">
+              <Server className="size-4" />
+            </div>
+            <CardTitle className="truncate">{instance.name}</CardTitle>
+          </div>
           <InstanceStatus state={instance.status.state} />
         </CardHeader>
         <CardContent className="text-muted-foreground grid grid-cols-2 gap-y-1 text-sm">

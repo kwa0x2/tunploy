@@ -13,6 +13,8 @@
 #   TUNPLOY_PORT         panel port (default: 3000)
 #   TUNPLOY_BIND         address the panel listens on (default: 127.0.0.1, reachable
 #                        over an SSH tunnel; 0.0.0.0 exposes it to the internet)
+#   TUNPLOY_ADMIN_NAME, TUNPLOY_ADMIN_EMAIL, TUNPLOY_ADMIN_PASSWORD
+#                        create the admin account without prompting
 set -eu
 
 IMAGE=${TUNPLOY_IMAGE:-ghcr.io/kwa0x2/tunploy}
@@ -77,7 +79,7 @@ detect_public_host() {
 install_panel() {
 	info "Pulling $IMAGE:$VERSION"
 	docker pull "$IMAGE:$VERSION" ||
-		fail "could not pull $IMAGE:$VERSION; if the image is private, run 'docker login ${IMAGE%%/*}' first"
+		fail "could not pull $IMAGE:$VERSION; check that this tag is published, or run 'docker login ${IMAGE%%/*}' if the image is private"
 
 	# Pull first, so a failed download leaves the running panel alone.
 	if docker inspect "$CONTAINER" >/dev/null 2>&1; then
@@ -99,19 +101,85 @@ install_panel() {
 		"$IMAGE:$VERSION" >/dev/null
 }
 
-wait_until_healthy() {
+panel_url() {
 	case "$BIND" in
-	0.0.0.0 | "") probe=127.0.0.1 ;;
-	*) probe=$BIND ;;
+	0.0.0.0 | "") echo "http://127.0.0.1:$PORT" ;;
+	*) echo "http://$BIND:$PORT" ;;
 	esac
+}
+
+wait_until_healthy() {
 	i=0
 	while [ "$i" -lt 30 ]; do
-		curl -fsS --max-time 2 "http://$probe:$PORT/api/health" >/dev/null 2>&1 && return
+		curl -fsS --max-time 2 "$(panel_url)/api/health" >/dev/null 2>&1 && return
 		i=$((i + 1))
 		sleep 1
 	done
 	docker logs --tail 30 "$CONTAINER" >&2 || true
 	fail "Tunploy did not become healthy; the container logs are above"
+}
+
+# The panel has no sign-up page, so the admin is created here, by whoever
+# has root on the server.
+ensure_admin() {
+	if ! curl -fsS --max-time 5 "$(panel_url)/api/setup" | grep -q '"setup_required":true'; then
+		ADMIN=existing
+		return
+	fi
+
+	if [ -n "${TUNPLOY_ADMIN_EMAIL:-}" ] && [ -n "${TUNPLOY_ADMIN_PASSWORD:-}" ]; then
+		create_admin "${TUNPLOY_ADMIN_NAME:-Admin}" "$TUNPLOY_ADMIN_EMAIL" "$TUNPLOY_ADMIN_PASSWORD" ||
+			fail "could not create the admin account"
+		ADMIN=$TUNPLOY_ADMIN_EMAIL
+		return
+	fi
+
+	# Piped into sh, stdin is the script itself; questions go to the terminal.
+	if ! (: </dev/tty) 2>/dev/null; then
+		warn "no terminal to ask for the admin account; create it with:"
+		warn "  docker exec -it $CONTAINER tunploy admin create"
+		return
+	fi
+
+	echo
+	info "Create the admin account"
+	tries=0
+	while [ "$tries" -lt 3 ]; do
+		tries=$((tries + 1))
+		name=$(ask "  Name: ")
+		email=$(ask "  Email: ")
+		password=$(ask_secret "  Password (at least 8 characters): ")
+		if [ "$password" != "$(ask_secret "  Repeat password: ")" ]; then
+			warn "the passwords do not match, try again"
+		elif create_admin "$name" "$email" "$password"; then
+			ADMIN=$email
+			return
+		fi
+	done
+	fail "no admin account was created; run 'docker exec -it $CONTAINER tunploy admin create' to try again"
+}
+
+# The password travels on stdin: as an argument, ps would show it.
+create_admin() {
+	printf '%s\n' "$3" | docker exec -i "$CONTAINER" tunploy admin create --name "$1" --email "$2"
+}
+
+ask() {
+	answer=
+	while [ -z "$answer" ]; do
+		printf '%s' "$1" >/dev/tty
+		IFS= read -r answer </dev/tty || fail "no answer"
+	done
+	printf '%s' "$answer"
+}
+
+ask_secret() {
+	printf '%s' "$1" >/dev/tty
+	stty -echo </dev/tty
+	IFS= read -r answer </dev/tty || answer=
+	stty echo </dev/tty
+	printf '\n' >/dev/tty
+	printf '%s' "$answer"
 }
 
 print_summary() {
@@ -124,12 +192,17 @@ print_summary() {
 		echo
 		echo "    ssh -L $PORT:localhost:$PORT ${SUDO_USER:-root}@${host:-<server-ip>}"
 		echo
-		echo "  and open http://localhost:$PORT to create the admin account."
+		echo "  and open http://localhost:$PORT."
 	else
-		echo "  Open http://${host:-<server-ip>}:$PORT and create the admin account now:"
-		echo "  until you do, whoever opens the panel first becomes its admin."
+		echo "  Open http://${host:-<server-ip>}:$PORT. It is plain HTTP, so prefer a trusted network"
+		echo "  or put it behind a reverse proxy with HTTPS."
 	fi
 	echo
+	case "${ADMIN:-}" in
+	"") echo "  Create the admin account first: docker exec -it $CONTAINER tunploy admin create" ;;
+	existing) echo "  Sign in with your existing admin account." ;;
+	*) echo "  Sign in as $ADMIN." ;;
+	esac
 	if [ -n "$host" ]; then
 		echo "  VPN clients will connect to $host."
 	else
@@ -140,12 +213,16 @@ print_summary() {
 }
 
 main() {
+	# A Ctrl-C during the password prompt must not leave the terminal mute.
+	trap 'stty echo </dev/tty 2>/dev/null || true' EXIT
+	trap 'exit 130' INT TERM
 	check_system
 	ensure_docker
 	check_wireguard
 	host=$(detect_public_host)
 	install_panel "$host"
 	wait_until_healthy
+	ensure_admin
 	print_summary "$host"
 }
 

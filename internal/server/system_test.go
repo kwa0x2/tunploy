@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/kwa0x2/tunploy/internal/auth"
 	"github.com/kwa0x2/tunploy/internal/docker"
 )
 
@@ -18,10 +19,23 @@ func (f fakeDocker) Ping(context.Context) (docker.Info, error) { return f.info, 
 
 func loggedIn(t *testing.T, s *Server) *http.Cookie {
 	t.Helper()
-	rec := do(t, s, "POST", "/api/setup", map[string]string{
-		"name": "Kwa", "email": "admin@example.com", "password": "hunter2hunter2",
+	createAdmin(t, s)
+	rec := do(t, s, "POST", "/api/auth/login", map[string]string{
+		"email": "admin@example.com", "password": "hunter2hunter2",
 	})
 	return sessionCookieFrom(t, rec)
+}
+
+// createAdmin stands in for `tunploy admin create`, the only way to make one.
+func createAdmin(t *testing.T, s *Server) {
+	t.Helper()
+	hash, err := auth.HashPassword("hunter2hunter2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.CreateFirstUser(context.Background(), "Kwa", "Admin@Example.com", hash); err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
 }
 
 func TestDockerStatus(t *testing.T) {
