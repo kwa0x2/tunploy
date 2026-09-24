@@ -44,15 +44,17 @@ func run() error {
 	}
 	defer st.Close()
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go purgeExpiredSessions(ctx, st)
+
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           server.New(cfg, st),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -76,4 +78,25 @@ func run() error {
 	}
 	slog.Info("tunploy stopped cleanly")
 	return nil
+}
+
+func purgeExpiredSessions(ctx context.Context, st *store.Store) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := st.DeleteExpiredSessions(ctx)
+			if err != nil {
+				slog.Error("purge expired sessions", "error", err)
+				continue
+			}
+			if n > 0 {
+				slog.Info("purged expired sessions", "count", n)
+			}
+		}
+	}
 }
