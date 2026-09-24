@@ -30,3 +30,12 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Tunploy
+/data/
+/bin/
+/tunploy
+
+# Frontend
+node_modules/
+web/dist/
