@@ -11,7 +11,7 @@ export function SiteFooter({ className }: { className?: string }) {
       >
         Netta Technologies
       </a>{" "}
-      · CRO 5802085 · © 2026 Alper Karakoyun
+      · © 2026 Alper Karakoyun
     </footer>
   )
 }

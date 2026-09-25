@@ -29,6 +29,17 @@ import (
 // version is stamped at build time with -ldflags.
 var version = "dev"
 
+const usage = `usage: tunploy [command]
+
+Without a command it runs the panel.
+
+commands:
+  admin     create the admin account, reset its password or turn off 2FA
+  backup    list the backups in S3 and restore one
+  version   print the version
+  health    exit 0 when the panel on this machine answers
+`
+
 const (
 	peerWatchInterval = 10 * time.Second
 	eventRetention    = 90 * 24 * time.Hour
@@ -45,6 +56,16 @@ func main() {
 			os.Exit(runSelfUpdate(os.Args[2:]))
 		case "health":
 			os.Exit(runHealth())
+		case "version", "--version":
+			fmt.Println(version)
+			return
+		case "help", "-h", "--help":
+			fmt.Print(usage)
+			return
+		default:
+			// A typo must not start a second panel on the same database.
+			fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", os.Args[1], usage)
+			os.Exit(2)
 		}
 	}
 	if err := run(); err != nil {

@@ -13,7 +13,7 @@ The script installs Docker if needed, starts Tunploy, asks for your admin accoun
 
 Have a domain? Point its A record at the server and add it under **Settings → Domain**; the panel gets a free Let's Encrypt certificate and serves itself over HTTPS.
 
-When a new release is out, the panel offers **Update now** and updates itself, rolling back on its own if the new version doesn't start. To remove Tunploy, run the same command with `sh -s uninstall`.
+When a new release is out, the panel offers **Update now** and updates itself, rolling back on its own if the new version doesn't start. The install also adds a `tunploy` command on the server for resetting the admin password, restoring backups, reading logs and removing Tunploy (`tunploy uninstall`); run `tunploy help`.
 
 See [docs/install.md](docs/install.md) for options, HTTPS, two-factor sign-in, updating, uninstalling, firewall ports and troubleshooting.
 

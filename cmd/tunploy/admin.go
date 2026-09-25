@@ -27,9 +27,11 @@ commands:
   disable-2fa      turn off two-factor authentication, for a lost phone
 
 The password is read from the terminal without echo, or as one line from
-stdin when it is piped in. Run it inside the container:
+stdin when it is piped in. On a server set up by the install script:
 
-  docker exec -it tunploy tunploy admin create
+  tunploy admin create
+
+Otherwise run it inside the container: docker exec -it tunploy tunploy admin create
 `
 
 var errAdminExists = errors.New("an admin account already exists; use 'tunploy admin reset-password' to change its password")

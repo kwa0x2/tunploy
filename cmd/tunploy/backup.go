@@ -28,8 +28,11 @@ A restore replaces every server, device, setting and user with the backup's,
 keeps the backup storage settings, and signs everyone out. It works while the
 panel is stopped or broken; restart the panel afterwards to apply it:
 
-  docker exec -it tunploy tunploy backup restore --s3 tunploy-backup-20260925-030000.tar.gz
-  docker restart tunploy
+  tunploy backup restore --s3 tunploy-backup-20260925-030000.tar.gz
+  tunploy restart
+
+Without the install script, prefix it with "docker exec -it tunploy" and restart
+with "docker restart tunploy".
 
 An encrypted backup is opened with the panel's saved passphrase, or you are
 asked for it (as one line on stdin when it is piped in).

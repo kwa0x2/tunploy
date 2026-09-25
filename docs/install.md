@@ -21,12 +21,13 @@ The script:
 3. Detects the server's public IPv4 address, which VPN clients will connect to.
 4. Pulls `ghcr.io/kwa0x2/tunploy:latest` and starts it with its data in `/var/lib/tunploy`.
 5. Waits until the panel answers.
-6. Asks for your name, email and password and creates the admin account.
-7. Prints how to reach the panel.
+6. Installs the `tunploy` command (see [Server commands](#server-commands)).
+7. Asks for your name, email and password and creates the admin account.
+8. Prints how to reach the panel.
 
 The panel has no sign-up page. The admin account can only be created on the server, so nobody who stumbles on the panel can claim it.
 
-To upgrade later, use **Update now** in the panel (see [Updating](#updating)), or run the same command again. It pulls the newest image and replaces the container; your servers, peers and account stay in `/var/lib/tunploy`, and it does not ask for an account again. The port, bind address and trusted proxies you chose before are kept; the panel domain lives in the database, so it is kept too.
+To upgrade later, use **Update now** in the panel (see [Updating](#updating)), run `tunploy update`, or run the same command again. It pulls the newest image and replaces the container; your servers, peers and account stay in `/var/lib/tunploy`, and it does not ask for an account again. The port, bind address and trusted proxies you chose before are kept; the panel domain lives in the database, so it is kept too.
 
 ### Options
 
@@ -63,9 +64,15 @@ The panel checks GitHub for a new Tunploy release twice a day. When there is one
 
 VPN servers run in their own containers and keep running throughout, so connected devices stay connected. You stay signed in. The activity log records every update and every failed one.
 
-The button only works for a panel started by the install script. A panel started with Docker Compose shows how to update it (`docker compose pull && docker compose up -d`) instead. Running the install command again also updates. Set `TUNPLOY_UPDATE_CHECK=false` to stop the panel from contacting GitHub on its own; **Check now** still asks when you press it.
+The button only works for a panel started by the install script. A panel started with Docker Compose shows how to update it (`docker compose pull && docker compose up -d`) instead. Running `tunploy update` or the install command again also updates. Set `TUNPLOY_UPDATE_CHECK=false` to stop the panel from contacting GitHub on its own; **Check now** still asks when you press it.
 
 ## Uninstall
+
+```sh
+tunploy uninstall
+```
+
+or, if the `tunploy` command is missing:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh | sudo sh -s uninstall
@@ -73,7 +80,23 @@ curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh | su
 
 This removes the panel container, every VPN server it runs, and their images. Connected devices lose their connection. It asks before deleting `/var/lib/tunploy`, which holds every server, device key, backup and the admin account. Keep that directory and a later install picks everything up again. Docker itself stays installed.
 
-Add `--purge` to delete `/var/lib/tunploy` without asking, and `--yes` to skip the confirmation when there is no terminal: `sudo sh -s uninstall --yes --purge`.
+Add `--purge` to delete `/var/lib/tunploy` without asking, and `--yes` to skip the confirmation when there is no terminal: `tunploy uninstall --yes --purge`.
+
+## Server commands
+
+The install script puts a `tunploy` command on the server, for what can't be done from the panel:
+
+| Command | What it does |
+| --- | --- |
+| `tunploy admin` | Create the admin account, reset its password or turn off two-factor sign-in (see [Manage the admin account](#manage-the-admin-account)). |
+| `tunploy backup` | List the backups in S3 and restore one (see [Restoring from the command line](#restoring-from-the-command-line)). |
+| `tunploy logs` | Follow the panel's logs. Takes `docker logs` flags, such as `--since 1h`. |
+| `tunploy restart` | Restart the panel. VPN servers keep running. |
+| `tunploy version` | Print the version the panel runs. |
+| `tunploy update [version]` | Update to the newest release, or to the given one, by running the install script again. |
+| `tunploy uninstall` | Remove Tunploy (see [Uninstall](#uninstall)). |
+
+The commands run in the panel's container, so they always match the version it runs. They need root and ask for `sudo` on their own, unless you are in the `docker` group.
 
 ## Sign in
 
@@ -160,14 +183,14 @@ Install Tunploy there, connect the same bucket and folder, and restore the newes
 When the panel will not start, restore on the server itself. It works whether the panel is running or not; restart it afterwards and it rebuilds its VPN servers as it starts:
 
 ```sh
-docker exec -it tunploy tunploy backup list
-docker exec -it tunploy tunploy backup restore --s3 tunploy-backup-20260925-030000.tar.gz
-docker restart tunploy
+tunploy backup list
+tunploy backup restore --s3 tunploy-backup-20260925-030000.tar.gz
+tunploy restart
 ```
 
-To restore a file instead, copy it in first: `docker cp backup.tar.gz tunploy:/tmp/` and run `tunploy backup restore /tmp/backup.tar.gz`. Without a terminal, add `--yes` and pipe the passphrase on stdin.
+To restore a file on the server instead, pass its path: `tunploy backup restore ./tunploy-backup-20260925-030000.tar.gz`. Without a terminal, add `--yes` and pipe the passphrase on stdin.
 
-If the database itself is damaged, the container keeps restarting and `docker exec` cannot reach it. Stop it, move the database aside, and restore from a file with a one-off container on the same data directory:
+If the database itself is damaged, the container keeps restarting and the `tunploy` command cannot reach it. Stop it, move the database aside, and restore from a file with a one-off container on the same data directory:
 
 ```sh
 docker stop tunploy
@@ -180,20 +203,22 @@ docker start tunploy
 
 ## Manage the admin account
 
-These run inside the panel's container and ask for the password without echoing it:
+These ask for the password without echoing it:
 
 ```sh
 # Create the admin, if the install could not ask (for example, no terminal)
-docker exec -it tunploy tunploy admin create
+tunploy admin create
 
 # Forgot the password: set a new one and sign out every session
-docker exec -it tunploy tunploy admin reset-password --email you@example.com
+tunploy admin reset-password --email you@example.com
 
 # Lost the phone with the authenticator app: turn two-factor sign-in off
-docker exec -it tunploy tunploy admin disable-2fa --email you@example.com
+tunploy admin disable-2fa --email you@example.com
 ```
 
-Once signed in, you can also change the password under **Settings**.
+With Docker Compose there is no `tunploy` command on the server; run the same commands in the container instead, as in `docker exec -it tunploy tunploy admin create`.
+
+Once signed in, you can also change the password under **Settings → Security**.
 
 ## Open the ports
 
@@ -265,4 +290,4 @@ docker exec -it tunploy tunploy admin create
 
 **HTTPS does not work.** **Settings → Domain** shows why the last certificate request failed. Check that the domain's A record points to the server (`dig +short panel.example.com`) and that TCP 80 and 443 are open in the provider's firewall.
 
-**Forgot the admin password.** Run `docker exec -it tunploy tunploy admin reset-password --email you@example.com` on the server. Servers and peers are not affected.
+**Forgot the admin password.** Run `tunploy admin reset-password --email you@example.com` on the server. Servers and peers are not affected.
