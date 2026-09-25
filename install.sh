@@ -169,7 +169,7 @@ install_panel() {
 	HTTPS_PORTS=
 	warn "TCP 80 or 443 is taken by another program, so the panel can't serve HTTPS itself."
 	warn "Free both and run this again, or put the panel behind your web server:"
-	warn "https://github.com/kwa0x2/tunploy/blob/main/docs/install.md#https"
+	warn "https://github.com/kwa0x2/tunploy/blob/main/README.md#https"
 	run_panel "$@"
 }
 
