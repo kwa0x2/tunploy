@@ -1,5 +1,5 @@
 import { Smartphone } from "lucide-react"
-import type { InstanceState, Peer, PeerBlock } from "@/lib/api"
+import type { InstanceState, NodeState, Peer, PeerBlock } from "@/lib/api"
 import { countryFlag, countryName, formatBytes, monthTotal } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -33,6 +33,28 @@ const states: Record<InstanceState, { label: string; tone: string; dot: string }
 
 export function InstanceStatus({ state, className }: { state: InstanceState; className?: string }) {
   const { label, tone, dot } = states[state]
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+        tone,
+        className,
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", dot)} />
+      {label}
+    </span>
+  )
+}
+
+const nodeStates: Record<NodeState, { label: string; tone: string; dot: string }> = {
+  online: { ...states.running, label: "Online" },
+  connecting: { ...states.unknown, label: "Connecting" },
+  offline: { ...states.restarting, label: "Offline" },
+}
+
+export function NodeStatus({ state, className }: { state: NodeState; className?: string }) {
+  const { label, tone, dot } = nodeStates[state]
   return (
     <span
       className={cn(

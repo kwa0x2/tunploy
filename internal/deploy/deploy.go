@@ -12,7 +12,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -54,27 +53,31 @@ type Docker interface {
 }
 
 type Manager struct {
-	store   *store.Store
-	docker  Docker
-	dataDir string
-	prefix  string
-	image   string
-	files   map[string][]byte
+	store  *store.Store
+	local  Host
+	remote func(nodeID int64) (Host, error)
+	prefix string
+	image  string
+	files  map[string][]byte
 
-	// Serialises container changes so requests never race to recreate one.
-	mu sync.Mutex
+	// One lock per node serialises its container changes, so requests never
+	// race to recreate one and a slow node never holds up another.
+	locksMu sync.Mutex
+	locks   map[int64]*sync.Mutex
 
 	activity     activity
 	onPeerChange func(PeerChange)
+	onPeerBlock  func(PeerBlock)
+	now          func() time.Time
 
-	// What each instance's config was last written with; guarded by mu.
-	blocked     map[int64]map[int64]wg.Block
-	onPeerBlock func(PeerBlock)
-	now         func() time.Time
-
-	// Whether each instance looked down on the last watch; only Watch touches it.
+	stateMu sync.Mutex
+	// What each instance's config was last written with.
+	blocked map[int64]map[int64]wg.Block
+	// Whether each instance looked down on the last watch.
 	down           map[int64]bool
 	onServerHealth func(ServerHealth)
+	// Nodes to rebuild instead of reconcile when they next come up.
+	rebuild map[int64]bool
 }
 
 type ServerHealth struct {
@@ -107,16 +110,56 @@ func New(st *store.Store, dk Docker, dataDir, prefix string) (*Manager, error) {
 
 	return &Manager{
 		store:    st,
-		docker:   dk,
-		dataDir:  dataDir,
+		local:    localHost{Docker: dk, root: dataDir},
 		prefix:   prefix,
 		image:    imageTag(files),
 		files:    files,
+		locks:    map[int64]*sync.Mutex{},
 		activity: activity{peers: map[int64]map[wg.Key]sample{}},
 		blocked:  map[int64]map[int64]wg.Block{},
 		now:      time.Now,
 		down:     map[int64]bool{},
+		rebuild:  map[int64]bool{},
 	}, nil
+}
+
+// SetRemote must be called before Watch starts or requests arrive; without
+// it every node other than the panel's own counts as offline.
+func (m *Manager) SetRemote(fn func(nodeID int64) (Host, error)) { m.remote = fn }
+
+func (m *Manager) host(nodeID int64) (Host, error) {
+	if nodeID == 0 {
+		return m.local, nil
+	}
+	if m.remote == nil {
+		return nil, ErrNodeOffline
+	}
+	return m.remote(nodeID)
+}
+
+func (m *Manager) lock(nodeID int64) func() {
+	m.locksMu.Lock()
+	mu, ok := m.locks[nodeID]
+	if !ok {
+		mu = &sync.Mutex{}
+		m.locks[nodeID] = mu
+	}
+	m.locksMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
+}
+
+// acquire loads the instance, reaches its node and locks it.
+func (m *Manager) acquire(ctx context.Context, instanceID int64) (*wg.Instance, Host, func(), error) {
+	in, err := m.store.InstanceByID(ctx, instanceID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	h, err := m.host(in.NodeID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return in, h, m.lock(in.NodeID), nil
 }
 
 // A new tag per build context lets Reconcile move containers onto upgrades.
@@ -148,60 +191,69 @@ func (m *Manager) owns(ct docker.Container) bool {
 	return ok && ct.Name == m.prefix+id
 }
 
+// ConfigDir is where an instance on the panel's own machine keeps its config.
 func (m *Manager) ConfigDir(instanceID int64) string {
-	return filepath.Join(m.dataDir, "wireguard", strconv.FormatInt(instanceID, 10))
+	return configDir(m.local, instanceID)
+}
+
+func configDir(h Host, instanceID int64) string {
+	return filepath.Join(h.Root(), "wireguard", strconv.FormatInt(instanceID, 10))
 }
 
 func (m *Manager) Deploy(ctx context.Context, instanceID int64, start bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.deploy(ctx, instanceID, start, nil)
+	in, h, unlock, err := m.acquire(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return m.deploy(ctx, h, in, start, nil)
 }
 
 func (m *Manager) Provision(ctx context.Context, instanceID int64, progress Progress) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.deploy(ctx, instanceID, true, progress)
+	in, h, unlock, err := m.acquire(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return m.deploy(ctx, h, in, true, progress)
 }
 
 // Port and MTU are fixed at container creation, so changing them needs this.
 func (m *Manager) Redeploy(ctx context.Context, instanceID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	ct, err := m.container(ctx, instanceID)
+	in, h, unlock, err := m.acquire(ctx, instanceID)
 	if err != nil {
 		return err
 	}
-	return m.deploy(ctx, instanceID, ct == nil || ct.Running(), nil)
-}
+	defer unlock()
 
-func (m *Manager) deploy(ctx context.Context, instanceID int64, start bool, progress Progress) error {
-	if err := m.writeConfig(ctx, instanceID); err != nil {
+	ct, err := m.container(ctx, h, instanceID)
+	if err != nil {
 		return err
 	}
-	if err := m.ensureImage(ctx); err != nil {
+	return m.deploy(ctx, h, in, ct == nil || ct.Running(), nil)
+}
+
+func (m *Manager) deploy(ctx context.Context, h Host, in *wg.Instance, start bool, progress Progress) error {
+	if err := m.writeConfig(ctx, h, in); err != nil {
+		return err
+	}
+	if err := m.ensureImage(ctx, h); err != nil {
 		return err
 	}
 	progress.report(StepImage)
 
-	in, err := m.store.InstanceByID(ctx, instanceID)
-	if err != nil {
-		return err
-	}
-
 	name := m.ContainerName(in.ID)
-	if err := m.docker.RemoveContainer(ctx, name); err != nil && !errors.Is(err, docker.ErrNotFound) {
+	if err := h.RemoveContainer(ctx, name); err != nil && !errors.Is(err, docker.ErrNotFound) {
 		return err
 	}
 
 	port := uint16(in.ListenPort)
-	_, err = m.docker.CreateContainer(ctx, docker.ContainerSpec{
+	_, err := h.CreateContainer(ctx, docker.ContainerSpec{
 		Name:   name,
 		Image:  m.image,
 		Labels: map[string]string{LabelInstance: strconv.FormatInt(in.ID, 10)},
 		Ports:  []docker.Port{{Host: port, Container: port, Protocol: network.UDP}},
-		Mounts: []docker.Mount{{Source: m.ConfigDir(in.ID), Target: "/etc/wireguard", ReadOnly: true}},
+		Mounts: []docker.Mount{{Source: configDir(h, in.ID), Target: "/etc/wireguard", ReadOnly: true}},
 		CapAdd: []string{"NET_ADMIN"},
 		Sysctls: map[string]string{
 			"net.ipv4.ip_forward": "1",
@@ -213,99 +265,152 @@ func (m *Manager) deploy(ctx context.Context, instanceID int64, start bool, prog
 	if !start {
 		return nil
 	}
-	if err := m.docker.StartContainer(ctx, name); err != nil {
+	if err := h.StartContainer(ctx, name); err != nil {
 		return err
 	}
 	progress.report(StepContainer)
-	return m.waitReady(ctx, name, progress)
+	return m.waitReady(ctx, h, name, progress)
 }
 
-func (m *Manager) ensureImage(ctx context.Context) error {
-	ok, err := m.docker.ImageExists(ctx, m.image)
+func (m *Manager) ensureImage(ctx context.Context, h Host) error {
+	ok, err := h.ImageExists(ctx, m.image)
 	if err != nil || ok {
 		return err
 	}
-	return m.docker.BuildImage(ctx, m.image, m.files)
+	return h.BuildImage(ctx, m.image, m.files)
+}
+
+// PrepareNode builds the WireGuard image on a node ahead of its first server.
+func (m *Manager) PrepareNode(ctx context.Context, h Host) error {
+	return m.ensureImage(ctx, h)
 }
 
 func (m *Manager) Start(ctx context.Context, instanceID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	in, h, unlock, err := m.acquire(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
-	ct, err := m.container(ctx, instanceID)
+	ct, err := m.container(ctx, h, instanceID)
 	if err != nil {
 		return err
 	}
 	if ct == nil {
-		return m.deploy(ctx, instanceID, true, nil)
+		return m.deploy(ctx, h, in, true, nil)
 	}
-	if err := m.writeConfig(ctx, instanceID); err != nil {
+	if err := m.writeConfig(ctx, h, in); err != nil {
 		return err
 	}
 	if ct.Running() {
 		return nil
 	}
-	return m.docker.StartContainer(ctx, ct.Name)
+	return h.StartContainer(ctx, ct.Name)
 }
 
 func (m *Manager) Stop(ctx context.Context, instanceID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	_, h, unlock, err := m.acquire(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
-	ct, err := m.container(ctx, instanceID)
+	ct, err := m.container(ctx, h, instanceID)
 	if err != nil || ct == nil {
 		return err
 	}
-	return m.docker.StopContainer(ctx, ct.Name, stopTimeout)
+	return h.StopContainer(ctx, ct.Name, stopTimeout)
 }
 
 func (m *Manager) Restart(ctx context.Context, instanceID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	in, h, unlock, err := m.acquire(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
-	ct, err := m.container(ctx, instanceID)
+	ct, err := m.container(ctx, h, instanceID)
 	if err != nil {
 		return err
 	}
 	if ct == nil {
-		return m.deploy(ctx, instanceID, true, nil)
+		return m.deploy(ctx, h, in, true, nil)
 	}
-	if err := m.writeConfig(ctx, instanceID); err != nil {
+	if err := m.writeConfig(ctx, h, in); err != nil {
 		return err
 	}
-	if err := m.docker.StopContainer(ctx, ct.Name, stopTimeout); err != nil {
+	if err := h.StopContainer(ctx, ct.Name, stopTimeout); err != nil {
 		return err
 	}
-	return m.docker.StartContainer(ctx, ct.Name)
+	return h.StartContainer(ctx, ct.Name)
 }
 
+// Remove must run before the row is deleted. On an offline node it returns
+// ErrNodeOffline; the node's next reconcile removes what is left.
 func (m *Manager) Remove(ctx context.Context, instanceID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	err := m.docker.RemoveContainer(ctx, m.ContainerName(instanceID))
-	if err != nil && !errors.Is(err, docker.ErrNotFound) {
-		return err
-	}
-	if err := os.RemoveAll(m.ConfigDir(instanceID)); err != nil {
-		return fmt.Errorf("remove config dir: %w", err)
-	}
-	m.activity.forget(instanceID)
-	delete(m.blocked, instanceID)
-	return nil
-}
-
-// Rebuild replaces every container after the database was swapped out, since
-// the same instance ID may now stand for a different server.
-func (m *Manager) Rebuild(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	instances, err := m.store.Instances(ctx)
+	_, h, unlock, err := m.acquire(ctx, instanceID)
 	if err != nil {
 		return err
 	}
-	containers, err := m.docker.ListContainers(ctx)
+	defer unlock()
+
+	err = h.RemoveContainer(ctx, m.ContainerName(instanceID))
+	if err != nil && !errors.Is(err, docker.ErrNotFound) {
+		return err
+	}
+	if err := h.RemoveAll(ctx, configDir(h, instanceID)); err != nil {
+		return err
+	}
+	m.forget(instanceID)
+	return nil
+}
+
+func (m *Manager) forget(instanceID int64) {
+	m.activity.forget(instanceID)
+	m.stateMu.Lock()
+	delete(m.blocked, instanceID)
+	delete(m.down, instanceID)
+	m.stateMu.Unlock()
+}
+
+// Rebuild replaces every container after the database was swapped out, since
+// the same instance ID may now stand for a different server. Other nodes are
+// rebuilt when they next come up.
+func (m *Manager) Rebuild(ctx context.Context) error {
+	if err := m.MarkRebuild(ctx); err != nil {
+		return err
+	}
+	return m.NodeUp(ctx, 0)
+}
+
+// MarkRebuild makes every node rebuild instead of reconcile when it next comes up.
+func (m *Manager) MarkRebuild(ctx context.Context) error {
+	nodes, err := m.store.Nodes(ctx)
+	if err != nil {
+		return err
+	}
+	m.activity.reset()
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	m.blocked = map[int64]map[int64]wg.Block{}
+	m.down = map[int64]bool{}
+	m.rebuild = map[int64]bool{0: true}
+	for _, n := range nodes {
+		m.rebuild[n.ID] = true
+	}
+	return nil
+}
+
+func (m *Manager) takeRebuild(nodeID int64) bool {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	pending := m.rebuild[nodeID]
+	delete(m.rebuild, nodeID)
+	return pending
+}
+
+func (m *Manager) rebuildNode(ctx context.Context, nodeID int64, h Host, instances []wg.Instance) error {
+	containers, err := h.ListContainers(ctx)
 	if err != nil {
 		return err
 	}
@@ -313,62 +418,81 @@ func (m *Manager) Rebuild(ctx context.Context) error {
 		if !m.owns(ct) {
 			continue
 		}
-		if err := m.docker.RemoveContainer(ctx, ct.Name); err != nil && !errors.Is(err, docker.ErrNotFound) {
+		if err := h.RemoveContainer(ctx, ct.Name); err != nil && !errors.Is(err, docker.ErrNotFound) {
 			return err
 		}
 	}
-
-	// Only stale directories go: Docker Desktop loses track of a bind mount
-	// whose parent was deleted and made again.
-	known := map[string]bool{}
-	for _, in := range instances {
-		known[strconv.FormatInt(in.ID, 10)] = true
+	if err := m.removeStaleConfigs(ctx, h, instances); err != nil {
+		return err
 	}
-	root := filepath.Join(m.dataDir, "wireguard")
-	entries, err := os.ReadDir(root)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("list config dirs: %w", err)
-	}
-	for _, e := range entries {
-		if !known[e.Name()] {
-			if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
-				return fmt.Errorf("remove config dir: %w", err)
-			}
-		}
-	}
-	m.activity.reset()
-	m.blocked = map[int64]map[int64]wg.Block{}
 
 	var errs []error
-	for _, in := range instances {
-		if err := m.deploy(ctx, in.ID, true, nil); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", in.Name, err))
+	for i := range instances {
+		if err := m.deploy(ctx, h, &instances[i], true, nil); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", instances[i].Name, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// syncconf applies peer changes without dropping connected peers.
-func (m *Manager) Apply(ctx context.Context, instanceID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.apply(ctx, instanceID)
-}
-
-func (m *Manager) apply(ctx context.Context, instanceID int64) error {
-	if err := m.writeConfig(ctx, instanceID); err != nil {
+// Only stale directories go: Docker Desktop loses track of a bind mount
+// whose parent was deleted and made again.
+func (m *Manager) removeStaleConfigs(ctx context.Context, h Host, instances []wg.Instance) error {
+	known := map[string]bool{}
+	for _, in := range instances {
+		known[strconv.FormatInt(in.ID, 10)] = true
+	}
+	root := filepath.Join(h.Root(), "wireguard")
+	names, err := h.ReadDir(ctx, root)
+	if err != nil {
 		return err
 	}
-	ct, err := m.container(ctx, instanceID)
+	for _, name := range names {
+		if !known[name] {
+			if err := h.RemoveAll(ctx, filepath.Join(root, name)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// syncconf applies peer changes without dropping connected peers. On an
+// offline node the change waits in the database for its next reconcile.
+func (m *Manager) Apply(ctx context.Context, instanceID int64) error {
+	in, h, unlock, err := m.acquire(ctx, instanceID)
+	if errors.Is(err, ErrNodeOffline) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return m.apply(ctx, h, in)
+}
+
+func (m *Manager) apply(ctx context.Context, h Host, in *wg.Instance) error {
+	if err := m.writeConfig(ctx, h, in); err != nil {
+		return err
+	}
+	ct, err := m.container(ctx, h, in.ID)
 	if err != nil || ct == nil || !ct.Running() {
 		return err
 	}
-	_, err = m.docker.Exec(ctx, ct.Name, []string{"tunploy-wg", "sync"})
+	_, err = h.Exec(ctx, ct.Name, []string{"tunploy-wg", "sync"})
 	return err
 }
 
 func (m *Manager) PeerStats(ctx context.Context, in *wg.Instance) (map[wg.Key]wg.PeerStats, error) {
-	ct, err := m.container(ctx, in.ID)
+	h, err := m.host(in.NodeID)
+	if err != nil {
+		return nil, err
+	}
+	return m.peerStats(ctx, h, in)
+}
+
+func (m *Manager) peerStats(ctx context.Context, h Host, in *wg.Instance) (map[wg.Key]wg.PeerStats, error) {
+	ct, err := m.container(ctx, h, in.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +500,7 @@ func (m *Manager) PeerStats(ctx context.Context, in *wg.Instance) (map[wg.Key]wg
 		m.activity.forget(in.ID)
 		return map[wg.Key]wg.PeerStats{}, nil
 	}
-	out, err := m.docker.Exec(ctx, ct.Name, []string{"wg", "show", iface, "dump"})
+	out, err := h.Exec(ctx, ct.Name, []string{"wg", "show", iface, "dump"})
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +525,8 @@ func (m *Manager) OnPeerBlock(fn func(PeerBlock)) { m.onPeerBlock = fn }
 // OnServerHealth must be set before Watch starts.
 func (m *Manager) OnServerHealth(fn func(ServerHealth)) { m.onServerHealth = fn }
 
-// Watch is the only caller of RecordTraffic, which needs a single writer.
+// Watch is the only caller of RecordTraffic, which needs a single writer per
+// instance. Nodes are watched side by side so a slow one delays no other.
 func (m *Manager) Watch(ctx context.Context, every time.Duration) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
@@ -416,29 +541,47 @@ func (m *Manager) Watch(ctx context.Context, every time.Duration) {
 			slog.Warn("watch peers", "error", err)
 			continue
 		}
-		for i := range instances {
-			if err := m.watchInstance(ctx, &instances[i]); err != nil && ctx.Err() == nil {
-				slog.Debug("watch peers", "instance", instances[i].ID, "error", err)
+		var nodes sync.WaitGroup
+		for nodeID, group := range byNode(instances) {
+			h, err := m.host(nodeID)
+			if err != nil {
+				continue
 			}
+			nodes.Go(func() {
+				for i := range group {
+					if err := m.watchInstance(ctx, h, &group[i]); err != nil && ctx.Err() == nil {
+						slog.Debug("watch peers", "instance", group[i].ID, "error", err)
+					}
+				}
+			})
 		}
+		nodes.Wait()
 	}
 }
 
-func (m *Manager) watchInstance(ctx context.Context, in *wg.Instance) error {
-	m.checkHealth(ctx, in.ID)
-	stats, err := m.PeerStats(ctx, in)
+func byNode(instances []wg.Instance) map[int64][]wg.Instance {
+	out := map[int64][]wg.Instance{}
+	for _, in := range instances {
+		out[in.NodeID] = append(out[in.NodeID], in)
+	}
+	return out
+}
+
+func (m *Manager) watchInstance(ctx context.Context, h Host, in *wg.Instance) error {
+	m.checkHealth(ctx, h, in.ID)
+	stats, err := m.peerStats(ctx, h, in)
 	if err != nil {
 		return err
 	}
 	if err := m.store.RecordTraffic(ctx, in.ID, stats, m.now()); err != nil {
 		return err
 	}
-	return m.enforceLimits(ctx, in.ID)
+	return m.enforceLimits(ctx, h, in)
 }
 
 // A stop from the panel exits cleanly, so only a crash loop or a failed exit counts as down.
-func (m *Manager) checkHealth(ctx context.Context, instanceID int64) {
-	ct, err := m.container(ctx, instanceID)
+func (m *Manager) checkHealth(ctx context.Context, h Host, instanceID int64) {
+	ct, err := m.container(ctx, h, instanceID)
 	if err != nil {
 		return
 	}
@@ -448,27 +591,30 @@ func (m *Manager) checkHealth(ctx context.Context, instanceID int64) {
 	}
 	down := st.State == StateRestarting || (st.State == StateStopped && st.Error != "")
 
+	m.stateMu.Lock()
 	was, known := m.down[instanceID]
 	m.down[instanceID] = down
+	m.stateMu.Unlock()
 	if known && was != down && m.onServerHealth != nil {
 		m.onServerHealth(ServerHealth{InstanceID: instanceID, Down: down, Reason: st.Error})
 	}
 }
 
 // Limits change with time and traffic alone, so nothing else would notice.
-func (m *Manager) enforceLimits(ctx context.Context, instanceID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *Manager) enforceLimits(ctx context.Context, h Host, in *wg.Instance) error {
+	defer m.lock(in.NodeID)()
 
-	peers, usage, next, err := m.blockedPeers(ctx, instanceID)
+	peers, usage, next, err := m.blockedPeers(ctx, in.ID)
 	if err != nil {
 		return err
 	}
-	prev, known := m.blocked[instanceID]
+	m.stateMu.Lock()
+	prev, known := m.blocked[in.ID]
+	m.stateMu.Unlock()
 	if known && maps.Equal(prev, next) {
 		return nil
 	}
-	if err := m.apply(ctx, instanceID); err != nil {
+	if err := m.apply(ctx, h, in); err != nil {
 		return err
 	}
 	if !known || m.onPeerBlock == nil {
@@ -476,7 +622,7 @@ func (m *Manager) enforceLimits(ctx context.Context, instanceID int64) error {
 	}
 	for _, p := range peers {
 		if prev[p.ID] != next[p.ID] {
-			m.onPeerBlock(PeerBlock{InstanceID: instanceID, Peer: p, Reason: next[p.ID], Month: usage[p.ID]})
+			m.onPeerBlock(PeerBlock{InstanceID: in.ID, Peer: p, Reason: next[p.ID], Month: usage[p.ID]})
 		}
 	}
 	return nil
@@ -504,19 +650,27 @@ func (m *Manager) blockedPeers(ctx context.Context, instanceID int64) ([]wg.Peer
 var ErrNotDeployed = errors.New("instance has no container")
 
 func (m *Manager) Logs(ctx context.Context, instanceID int64, tail int, follow bool) (io.ReadCloser, error) {
-	ct, err := m.container(ctx, instanceID)
+	in, err := m.store.InstanceByID(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	h, err := m.host(in.NodeID)
+	if err != nil {
+		return nil, err
+	}
+	ct, err := m.container(ctx, h, instanceID)
 	if err != nil {
 		return nil, err
 	}
 	if ct == nil {
 		return nil, ErrNotDeployed
 	}
-	return m.docker.Logs(ctx, ct.Name, tail, follow)
+	return h.Logs(ctx, ct.Name, tail, follow)
 }
 
 // container returns nil, nil when there is none.
-func (m *Manager) container(ctx context.Context, instanceID int64) (*docker.Container, error) {
-	ct, err := m.docker.InspectContainer(ctx, m.ContainerName(instanceID))
+func (m *Manager) container(ctx context.Context, h Host, instanceID int64) (*docker.Container, error) {
+	ct, err := h.InspectContainer(ctx, m.ContainerName(instanceID))
 	if errors.Is(err, docker.ErrNotFound) {
 		return nil, nil
 	}
@@ -527,38 +681,19 @@ func (m *Manager) container(ctx context.Context, instanceID int64) (*docker.Cont
 }
 
 // The container mounts the directory, not the file, so it sees the rename.
-func (m *Manager) writeConfig(ctx context.Context, instanceID int64) error {
-	in, err := m.store.InstanceByID(ctx, instanceID)
-	if err != nil {
-		return err
-	}
-	peers, _, blocked, err := m.blockedPeers(ctx, instanceID)
+func (m *Manager) writeConfig(ctx context.Context, h Host, in *wg.Instance) error {
+	peers, _, blocked, err := m.blockedPeers(ctx, in.ID)
 	if err != nil {
 		return err
 	}
 	allowed := slices.DeleteFunc(peers, func(p wg.Peer) bool { return blocked[p.ID] != "" })
 
-	dir := m.ConfigDir(instanceID)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+	path := filepath.Join(configDir(h, in.ID), iface+".conf")
+	if err := h.WriteFile(ctx, path, wg.ServerConfig(*in, allowed)); err != nil {
+		return err
 	}
-
-	tmp, err := os.CreateTemp(dir, ".wg0-*.conf")
-	if err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-	defer os.Remove(tmp.Name())
-
-	if _, err := tmp.Write(wg.ServerConfig(*in, allowed)); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write config: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-	if err := os.Rename(tmp.Name(), filepath.Join(dir, iface+".conf")); err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-	m.blocked[instanceID] = blocked
+	m.stateMu.Lock()
+	m.blocked[in.ID] = blocked
+	m.stateMu.Unlock()
 	return nil
 }

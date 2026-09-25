@@ -20,6 +20,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/geoip"
+	"github.com/kwa0x2/tunploy/internal/node"
 	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/tlscert"
@@ -117,11 +118,22 @@ func run() error {
 	}
 	backups := backup.NewService(st, cfg.DataDir, version)
 	updates := update.New(version, cfg.DataDir, dk, cfg.UpdateCheck)
-	handler := server.New(cfg, st, dk, mgr, backups, updates, geo, certs)
+	nodes := node.NewPool(st)
+	handler := server.New(cfg, st, dk, mgr, nodes, backups, updates, geo, certs)
 	updates.ReportLast(ctx)
 
+	// Marked before any node connects, so each one rebuilds as it does.
+	rebuild := backup.RebuildPending(cfg.DataDir)
+	if rebuild {
+		if err := mgr.MarkRebuild(ctx); err != nil {
+			return err
+		}
+	}
 	if logDockerStatus(ctx, dk) {
-		go reconcile(ctx, mgr, cfg.DataDir)
+		go reconcile(ctx, mgr, cfg.DataDir, rebuild)
+	}
+	if err := nodes.Start(ctx); err != nil {
+		slog.Error("connect to nodes", "error", err)
 	}
 	go mgr.Watch(ctx, peerWatchInterval)
 	go handler.RunNotifications(ctx)
@@ -218,10 +230,10 @@ func logDockerStatus(ctx context.Context, dk *docker.Client) bool {
 
 // After a restore from the command line the same container name may belong to
 // a different server, so every container is replaced instead.
-func reconcile(ctx context.Context, mgr *deploy.Manager, dataDir string) {
-	if backup.RebuildPending(dataDir) {
+func reconcile(ctx context.Context, mgr *deploy.Manager, dataDir string, rebuild bool) {
+	if rebuild {
 		slog.Info("rebuilding wireguard containers after a restore")
-		if err := mgr.Rebuild(ctx); err != nil {
+		if err := mgr.Reconcile(ctx); err != nil {
 			slog.Error("rebuild wireguard containers; restart the panel to try again", "error", err)
 			return
 		}

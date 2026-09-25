@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -34,6 +35,15 @@ func New(host string) (*Client, error) {
 	return &Client{api: api}, nil
 }
 
+// NewDialer reaches the daemon through dial, such as over SSH.
+func NewDialer(dial func(ctx context.Context, network, addr string) (net.Conn, error)) (*Client, error) {
+	api, err := client.New(client.WithHost("http://docker"), client.WithDialContext(dial))
+	if err != nil {
+		return nil, fmt.Errorf("docker client: %w", err)
+	}
+	return &Client{api: api}, nil
+}
+
 func (c *Client) Close() error { return c.api.Close() }
 
 type Info struct {
@@ -56,6 +66,34 @@ func (c *Client) Ping(ctx context.Context) (Info, error) {
 		APIVersion: c.api.ClientVersion(),
 		OS:         v.Os,
 		Arch:       v.Arch,
+	}, nil
+}
+
+type Daemon struct {
+	ID            string `json:"-"`
+	Version       string `json:"version"`
+	OS            string `json:"os"`
+	Arch          string `json:"arch"`
+	KernelVersion string `json:"kernel_version"`
+	CPUs          int    `json:"cpus"`
+	Memory        int64  `json:"memory"`
+}
+
+// Daemon describes the machine the daemon runs on. ID tells two daemons apart.
+func (c *Client) Daemon(ctx context.Context) (Daemon, error) {
+	res, err := c.api.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return Daemon{}, wrap(err, "info")
+	}
+	info := res.Info
+	return Daemon{
+		ID:            info.ID,
+		Version:       info.ServerVersion,
+		OS:            info.OperatingSystem,
+		Arch:          info.Architecture,
+		KernelVersion: info.KernelVersion,
+		CPUs:          info.NCPU,
+		Memory:        info.MemTotal,
 	}, nil
 }
 

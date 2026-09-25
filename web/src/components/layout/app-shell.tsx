@@ -5,6 +5,7 @@ import {
   ArrowUpCircle,
   Bell,
   Globe,
+  HardDrive,
   History,
   LayoutDashboard,
   LogOut,
@@ -38,6 +39,7 @@ const navigation = [
     items: [
       { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
       { to: "/servers", label: "Servers", icon: Server, end: false },
+      { to: "/nodes", label: "Nodes", icon: HardDrive, end: false },
       { to: "/peers", label: "Peers", icon: Users, end: false },
       { to: "/activity", label: "Activity", icon: History, end: false },
     ],

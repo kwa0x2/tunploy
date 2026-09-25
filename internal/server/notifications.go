@@ -311,5 +311,10 @@ func (s *Server) serverHealth(h deploy.ServerHealth) {
 	}
 	e := instanceEvent(kind, in)
 	e.Detail = h.Reason
+	if in.NodeID != 0 {
+		if n, err := s.store.NodeByID(ctx, in.NodeID); err == nil {
+			e.NodeName = n.Name
+		}
+	}
 	s.record(ctx, e)
 }

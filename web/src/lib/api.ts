@@ -66,6 +66,8 @@ export interface InstanceSettings {
 
 export interface Instance extends InstanceSettings {
   id: number
+  // 0 is the panel's own machine.
+  node_id: number
   name: string
   public_key: string
   created_at: string
@@ -74,7 +76,7 @@ export interface Instance extends InstanceSettings {
   peer_count: number
 }
 
-export type InstanceInput = Partial<InstanceSettings> & { name?: string }
+export type InstanceInput = Partial<InstanceSettings> & { name?: string; node_id?: number }
 
 export type ProvisionStep = "image" | "container" | "interface" | "firewall" | "nat"
 
@@ -138,6 +140,7 @@ export interface ActivityEvent {
   instance_name?: string
   peer_id?: number
   peer_name?: string
+  node_name?: string
   ip?: string
   country?: string
   detail?: string
@@ -277,6 +280,58 @@ export interface RestoreResult {
   warnings: string[]
 }
 
+export type NodeState = "online" | "offline" | "connecting"
+
+export interface NodeDaemon {
+  version: string
+  os: string
+  arch: string
+  kernel_version: string
+  cpus: number
+  memory: number
+}
+
+export interface Node {
+  // 0 is the panel's own machine.
+  id: number
+  name: string
+  host: string
+  port: number
+  username: string
+  host_key: string
+  host_key_fingerprint?: string
+  last_seen_at?: string
+  created_at?: string
+  local: boolean
+  server_count: number
+  status: { state: NodeState; error?: string; since?: string; daemon?: NodeDaemon }
+}
+
+export interface HostKeyScan {
+  host_key: string
+  fingerprint: string
+  algorithm: string
+}
+
+export interface PanelKey {
+  public_key: string
+  fingerprint: string
+}
+
+// The credentials are used once, to add the panel's own key.
+export interface NodeInput {
+  name: string
+  host: string
+  port: number
+  username: string
+  host_key: string
+  password?: string
+  private_key?: string
+  passphrase?: string
+}
+
+export type NodeStep = "connect" | "authorize" | "docker" | "wireguard" | "image"
+
 export interface PasswordChange {
   current_password: string
   new_password: string
@@ -375,18 +430,28 @@ async function streamText(path: string, onChunk: (text: string) => void, init?: 
   }
 }
 
-async function provisionInstance(
-  input: InstanceInput,
-  onStep: (step: ProvisionStep) => void,
-): Promise<Instance> {
-  let created: Instance | undefined
+interface StreamEvent<T, S> {
+  step?: S
+  error?: ApiErrorBody
+  log?: string[]
+  result?: T
+}
+
+// NDJSON: steps as they happen, then the result or an error on the last line.
+async function streamSteps<T, S>(
+  path: string,
+  body: unknown,
+  parse: (raw: Record<string, unknown>) => StreamEvent<T, S>,
+  onStep: (step: S) => void,
+): Promise<T> {
+  let result: T | undefined
   let rest = ""
 
   const handle = (line: string) => {
     if (!line.trim()) return
-    let event: ProvisionEvent
+    let event: StreamEvent<T, S>
     try {
-      event = JSON.parse(line) as ProvisionEvent
+      event = parse(JSON.parse(line) as Record<string, unknown>)
     } catch {
       throw new ApiError(0, {
         code: "invalid_response",
@@ -395,11 +460,11 @@ async function provisionInstance(
     }
     if (event.step) onStep(event.step)
     if (event.error) throw new DeployError(event.error, event.log)
-    if (event.instance) created = event.instance
+    if (event.result) result = event.result
   }
 
   await streamText(
-    "/api/instances",
+    path,
     (chunk) => {
       const lines = (rest + chunk).split("\n")
       rest = lines.pop() ?? ""
@@ -408,19 +473,41 @@ async function provisionInstance(
     {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
-      body: JSON.stringify(input),
+      body: JSON.stringify(body),
     },
   )
   handle(rest)
 
-  if (!created) {
+  if (!result) {
     throw new ApiError(0, {
       code: "stream_ended",
-      message: "The connection closed before the deploy finished. Check the server list.",
+      message: "The connection closed before it finished. Check the list before trying again.",
     })
   }
-  return created
+  return result
 }
+
+const provisionInstance = (input: InstanceInput, onStep: (step: ProvisionStep) => void) =>
+  streamSteps<Instance, ProvisionStep>(
+    "/api/instances",
+    input,
+    (raw) => {
+      const { instance, ...rest } = raw as ProvisionEvent
+      return { ...rest, result: instance }
+    },
+    onStep,
+  )
+
+const addNode = (input: NodeInput, onStep: (step: NodeStep) => void) =>
+  streamSteps<Node, NodeStep>(
+    "/api/nodes",
+    input,
+    (raw) => {
+      const { node, ...rest } = raw as StreamEvent<never, NodeStep> & { node?: Node }
+      return { ...rest, result: node }
+    },
+    onStep,
+  )
 
 export const api = {
   setupStatus: () => request<SetupStatus>("/api/setup"),
@@ -485,8 +572,17 @@ export const api = {
       `/api/events?limit=${opts.limit}${opts.category ? `&category=${opts.category}` : ""}`,
     ),
 
+  nodes: () => request<Node[]>("/api/nodes"),
+  panelKey: () => request<PanelKey>("/api/nodes/key"),
+  scanNode: (host: string, port: number) => post<HostKeyScan>("/api/nodes/scan", { host, port }),
+  addNode,
+  renameNode: (id: number, name: string) => patch<Node>(`/api/nodes/${id}`, { name }),
+  // force forgets a node that is offline, leaving its servers running there.
+  deleteNode: (id: number, force = false) => del(`/api/nodes/${id}${force ? "?force=true" : ""}`),
+
   instances: () => request<Instance[]>("/api/instances"),
-  instanceDefaults: () => request<InstanceSettings>("/api/instances/defaults"),
+  instanceDefaults: (nodeId = 0) =>
+    request<InstanceSettings>(`/api/instances/defaults${nodeId ? `?node_id=${nodeId}` : ""}`),
   instance: (id: number) => request<Instance>(instancePath(id)),
   provisionInstance,
   updateInstance: (id: number, input: InstanceInput) => patch<Instance>(instancePath(id), input),

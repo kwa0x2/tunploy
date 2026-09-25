@@ -10,9 +10,11 @@ import {
   Download,
   Gauge,
   Globe,
+  HardDrive,
   HeartPulse,
   Mail,
   ServerCrash,
+  ServerOff,
   KeyRound,
   Pencil,
   Plug,
@@ -164,6 +166,7 @@ function EventRow({ event, now }: { event: ActivityEvent; now: number }) {
 function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: ReactNode } {
   const server = e.instance_name && <ServerName event={e} />
   const device = e.peer_name && <b className="font-medium">{e.peer_name}</b>
+  const node = e.node_name && <b className="font-medium">{e.node_name}</b>
 
   switch (e.kind) {
     case "device.connected":
@@ -206,6 +209,16 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: ServerCrash, tone: "bad", text: <>Server {server} is down</> }
     case "server.recovered":
       return { icon: HeartPulse, tone: "good", text: <>Server {server} is running again</> }
+    case "node.added":
+      return { icon: HardDrive, tone: "good", text: <>Node {node} added</> }
+    case "node.renamed":
+      return { icon: Pencil, tone: "neutral", text: <>Node renamed to {node}</> }
+    case "node.deleted":
+      return { icon: Trash2, tone: "neutral", text: <>Node {node} removed</> }
+    case "node.offline":
+      return { icon: ServerOff, tone: "bad", text: <>Node {node} is offline</> }
+    case "node.online":
+      return { icon: HeartPulse, tone: "good", text: <>Node {node} is back online</> }
     case "settings.notifications_changed":
       return { icon: Mail, tone: "neutral", text: "Email notification settings changed" }
     case "settings.backups_changed":

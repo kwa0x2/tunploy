@@ -262,7 +262,7 @@ func TestStatusesWhenDockerIsDown(t *testing.T) {
 	in := f.instance(t, "Home", 51820)
 	f.docker.Unavailable = true
 
-	got := f.m.Statuses(context.Background(), []int64{in.ID})[in.ID]
+	got := f.m.Statuses(context.Background(), []wg.Instance{*in})[in.ID]
 	if got.State != StateUnknown || got.Error == "" {
 		t.Fatalf("status = %+v, want unknown with a reason", got)
 	}
@@ -276,7 +276,7 @@ func TestStatusReportsCrashLoop(t *testing.T) {
 		Labels: map[string]string{docker.LabelManaged: "true", LabelInstance: "1"},
 	})
 
-	if got := f.m.Status(context.Background(), in.ID); got.State != StateRestarting || got.Error == "" {
+	if got := f.m.Status(context.Background(), in); got.State != StateRestarting || got.Error == "" {
 		t.Fatalf("status = %+v", got)
 	}
 }

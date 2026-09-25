@@ -48,7 +48,7 @@ func newTestServerWithDeploy(t *testing.T, dk Docker, fk *dockertest.Fake) (*Ser
 	cfg := config.Config{SessionTTL: time.Hour, PublicHost: "vpn.example.com"}
 	bk := backup.NewService(st, t.TempDir(), "test")
 	up := update.New("1.0.0", t.TempDir(), &fakeSelf{}, false)
-	s := New(cfg, st, dk, mgr, bk, up, nil, &fakeHTTPS{status: tlscert.Status{Enabled: true, State: tlscert.StateOff}})
+	s := New(cfg, st, dk, mgr, newFakeNodes(), bk, up, nil, &fakeHTTPS{status: tlscert.Status{Enabled: true, State: tlscert.StateOff}})
 	s.lookupHost = func(ctx context.Context, host string) ([]string, error) {
 		if strings.HasSuffix(host, ".invalid") {
 			return nil, errors.New("no such host")

@@ -138,14 +138,14 @@ func TestDeployAgainstDocker(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339Nano, stamp); err != nil || !strings.Contains(string(out), "wireguard wg0 is up") {
 		t.Fatalf("want timestamped lines including the startup message, got %q (%q)", out, text)
 	}
-	if s := m.Status(ctx, created.ID); s.State != StateStopped || s.Error != "" {
+	if s := m.Status(ctx, created); s.State != StateStopped || s.Error != "" {
 		t.Fatalf("after a clean stop want stopped without error, got %+v", s)
 	}
 
 	if err := m.Remove(ctx, created.ID); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	if s := m.Status(ctx, created.ID); s.State != StateNotDeployed {
+	if s := m.Status(ctx, created); s.State != StateNotDeployed {
 		t.Fatalf("after remove want not_deployed, got %+v", s)
 	}
 	if _, err := os.Stat(m.ConfigDir(created.ID)); !errors.Is(err, os.ErrNotExist) {
@@ -258,7 +258,7 @@ func waitForState(t *testing.T, m *Manager, id int64, want State) {
 	deadline := time.Now().Add(20 * time.Second)
 	var s Status
 	for time.Now().Before(deadline) {
-		s = m.Status(context.Background(), id)
+		s = m.Status(context.Background(), &wg.Instance{ID: id})
 		if s.State == want {
 			return
 		}

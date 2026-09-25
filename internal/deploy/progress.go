@@ -45,11 +45,11 @@ type BootError struct {
 
 func (e *BootError) Error() string { return e.Reason }
 
-func (m *Manager) waitReady(ctx context.Context, name string, progress Progress) error {
+func (m *Manager) waitReady(ctx context.Context, h Host, name string, progress Progress) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, bootTimeout, errBootTimeout)
 	defer cancel()
 
-	logs, err := m.docker.Logs(ctx, name, bootLogLines*4, true)
+	logs, err := h.Logs(ctx, name, bootLogLines*4, true)
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func (m *Manager) waitReady(ctx context.Context, name string, progress Progress)
 
 	// The stream only ends on its own when the container stops.
 	reason := "container stopped before wireguard came up"
-	if ct, err := m.docker.InspectContainer(ctx, name); err == nil && ct.ExitCode != 0 {
+	if ct, err := h.InspectContainer(ctx, name); err == nil && ct.ExitCode != 0 {
 		reason = fmt.Sprintf("container exited with code %d before wireguard came up", ct.ExitCode)
 	}
 	return &BootError{Reason: reason, Log: tail}

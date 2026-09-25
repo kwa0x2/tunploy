@@ -20,7 +20,7 @@ func TestWatchReportsServerHealth(t *testing.T) {
 		ct, _ := f.docker.Container(f.m.ContainerName(in.ID))
 		ct.State, ct.ExitCode = state, code
 		f.docker.Add(ct)
-		f.m.watchInstance(ctx, in)
+		f.m.watchInstance(ctx, f.m.local, in)
 	}
 
 	set("running", 0) // first look is never a change

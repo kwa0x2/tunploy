@@ -21,6 +21,8 @@ import (
 
 // Pointers: PATCH touches only what it sends, create defaults the rest.
 type instanceRequest struct {
+	// Only on create: a server stays on the machine it was made on.
+	NodeID              *int64    `json:"node_id"`
 	Name                *string   `json:"name"`
 	Address             *string   `json:"address"`
 	ListenPort          *int      `json:"listen_port"`
@@ -47,11 +49,7 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 
-	ids := make([]int64, len(instances))
-	for i, in := range instances {
-		ids[i] = in.ID
-	}
-	statuses := s.deploy.Statuses(r.Context(), ids)
+	statuses := s.deploy.Statuses(r.Context(), instances)
 
 	views := make([]instanceView, len(instances))
 	for i, in := range instances {
@@ -80,7 +78,14 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 
-	in, err := s.defaultInstance(r.Context(), existing)
+	var nodeID int64
+	if req.NodeID != nil {
+		nodeID = *req.NodeID
+	}
+	in, err := s.defaultInstance(r.Context(), existing, nodeID)
+	if errors.Is(err, store.ErrNotFound) {
+		return httpx.Invalid(map[string]string{"node_id": "no such node"})
+	}
 	if err != nil {
 		return err
 	}
@@ -162,11 +167,22 @@ func (s *Server) streamProvision(w http.ResponseWriter, r *http.Request, in *wg.
 }
 
 func (s *Server) handleInstanceDefaults(w http.ResponseWriter, r *http.Request) error {
+	var nodeID int64
+	if raw := r.URL.Query().Get("node_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id < 0 {
+			return httpx.BadRequest("node_id must be a node's ID")
+		}
+		nodeID = id
+	}
 	existing, err := s.store.Instances(r.Context())
 	if err != nil {
 		return err
 	}
-	in, err := s.defaultInstance(r.Context(), existing)
+	in, err := s.defaultInstance(r.Context(), existing, nodeID)
+	if errors.Is(err, store.ErrNotFound) {
+		return httpx.NotFound("node not found")
+	}
 	if err != nil {
 		return err
 	}
@@ -191,14 +207,25 @@ type instanceDefaults struct {
 	ClientAllowedIPs    []netip.Prefix `json:"client_allowed_ips"`
 }
 
-func (s *Server) defaultInstance(ctx context.Context, existing []wg.Instance) (wg.Instance, error) {
+// Subnets stay apart across nodes too, so a client can hold configs for
+// several servers at once; ports only need to differ per machine.
+func (s *Server) defaultInstance(ctx context.Context, existing []wg.Instance, nodeID int64) (wg.Instance, error) {
 	settings, err := s.settings(ctx)
 	if err != nil {
 		return wg.Instance{}, err
 	}
-	in := wg.NewInstance("", settings.publicHost(s.cfg.PublicHost))
+	endpoint := settings.publicHost(s.cfg.PublicHost)
+	if nodeID != 0 {
+		n, err := s.store.NodeByID(ctx, nodeID)
+		if err != nil {
+			return wg.Instance{}, err
+		}
+		endpoint = n.Host
+	}
+	in := wg.NewInstance("", endpoint)
+	in.NodeID = nodeID
 	in.Address = nextFreeSubnet(existing)
-	in.ListenPort = nextFreePort(existing)
+	in.ListenPort = nextFreePort(existing, nodeID)
 	in.DNS = slices.Clone(settings.DefaultDNS)
 	return in, nil
 }
@@ -231,6 +258,9 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) er
 
 	in := *current
 	fields := req.apply(&in)
+	if req.NodeID != nil && *req.NodeID != current.NodeID {
+		fields["node_id"] = "a server cannot move to another node"
+	}
 	if in.Address != current.Address {
 		fields["address"] = "address cannot be changed once peers may hold configs for it"
 	}
@@ -258,8 +288,9 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	// Container first: a leftover row beats a tunnel the panel forgot.
-	if err := s.deploy.Remove(r.Context(), in.ID); err != nil {
+	// Container first: a leftover row beats a tunnel the panel forgot. An
+	// offline node drops the orphan itself when it reconnects.
+	if err := s.deploy.Remove(r.Context(), in.ID); err != nil && !errors.Is(err, deploy.ErrNodeOffline) {
 		return deployError(err)
 	}
 	if err := s.store.DeleteInstance(r.Context(), in.ID); err != nil {
@@ -298,7 +329,7 @@ func (s *Server) instanceView(ctx context.Context, in *wg.Instance) (instanceVie
 	}
 	return instanceView{
 		Instance:  *in,
-		Status:    s.deploy.Status(ctx, in.ID),
+		Status:    s.deploy.Status(ctx, in),
 		PeerCount: len(peers),
 	}, nil
 }
@@ -387,7 +418,7 @@ func instanceWriteError(err error) error {
 		case "name":
 			return httpx.Invalid(map[string]string{"name": "an instance with this name already exists"})
 		case "listen_port":
-			return httpx.Invalid(map[string]string{"listen_port": "another instance already uses this port"})
+			return httpx.Invalid(map[string]string{"listen_port": "another server on this machine already uses this port"})
 		}
 	}
 	return err
@@ -398,6 +429,8 @@ func deployError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return httpx.NotFound("instance not found")
+	case errors.Is(err, deploy.ErrNodeOffline):
+		return httpx.Errorf(http.StatusServiceUnavailable, "node_offline", "%v", err)
 	case errors.Is(err, docker.ErrUnavailable):
 		return httpx.Errorf(http.StatusServiceUnavailable, "docker_unavailable", "docker is not reachable: %v", err)
 	default:
@@ -427,10 +460,12 @@ func nextFreeSubnet(existing []wg.Instance) netip.Prefix {
 	return wg.DefaultAddress
 }
 
-func nextFreePort(existing []wg.Instance) int {
+func nextFreePort(existing []wg.Instance, nodeID int64) int {
 	used := make(map[int]bool, len(existing))
 	for _, in := range existing {
-		used[in.ListenPort] = true
+		if in.NodeID == nodeID {
+			used[in.ListenPort] = true
+		}
 	}
 	port := wg.DefaultListenPort
 	for used[port] && port < 65535 {

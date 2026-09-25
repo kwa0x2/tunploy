@@ -29,6 +29,7 @@ type Server struct {
 	store         *store.Store
 	docker        Docker
 	deploy        *deploy.Manager
+	nodes         Nodes
 	geo           *geoip.DB
 	https         HTTPS
 	notifier      *notify.Notifier
@@ -42,13 +43,14 @@ type Server struct {
 	stopStreams context.CancelFunc
 }
 
-// Call New before mgr.Watch, bk.Run and up.Run: it hooks into their events.
-func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, bk *backup.Service, up *update.Service, geo *geoip.DB, https HTTPS) *Server {
+// Call New before mgr.Watch, nodes.Start, bk.Run and up.Run: it hooks into their events.
+func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, nodes Nodes, bk *backup.Service, up *update.Service, geo *geoip.DB, https HTTPS) *Server {
 	s := &Server{
 		cfg:           cfg,
 		store:         st,
 		docker:        dk,
 		deploy:        mgr,
+		nodes:         nodes,
 		geo:           geo,
 		https:         https,
 		notifier:      notify.New(),
@@ -60,6 +62,9 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, bk 
 	mgr.OnPeerChange(s.peerChanged)
 	mgr.OnPeerBlock(s.peerBlocked)
 	mgr.OnServerHealth(s.serverHealth)
+	mgr.SetRemote(nodes.Host)
+	nodes.OnConnect(s.nodeConnected)
+	nodes.OnChange(s.nodeChanged)
 	bk.OnEvent(s.record)
 	up.OnEvent(s.record)
 	s.closing, s.stopStreams = context.WithCancel(context.Background())
@@ -114,6 +119,13 @@ func (s *Server) routes() http.Handler {
 	private.Handle("GET /api/backups/{name}", httpx.Handler(s.handleDownloadBackup))
 	private.Handle("DELETE /api/backups/{name}", httpx.Handler(s.handleDeleteBackup))
 	private.Handle("POST /api/backups/{name}/restore", httpx.Handler(s.handleRestoreRemote))
+
+	private.Handle("GET /api/nodes", httpx.Handler(s.handleListNodes))
+	private.Handle("POST /api/nodes", httpx.Handler(s.handleCreateNode))
+	private.Handle("GET /api/nodes/key", httpx.Handler(s.handlePanelKey))
+	private.Handle("POST /api/nodes/scan", httpx.Handler(s.handleScanNode))
+	private.Handle("PATCH /api/nodes/{id}", httpx.Handler(s.handleUpdateNode))
+	private.Handle("DELETE /api/nodes/{id}", httpx.Handler(s.handleDeleteNode))
 
 	private.Handle("GET /api/instances", httpx.Handler(s.handleListInstances))
 	private.Handle("POST /api/instances", httpx.Handler(s.handleCreateInstance))

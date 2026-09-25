@@ -11,6 +11,7 @@ import (
 
 type Docker interface {
 	Ping(ctx context.Context) (docker.Info, error)
+	Daemon(ctx context.Context) (docker.Daemon, error)
 }
 
 type dockerStatusResponse struct {

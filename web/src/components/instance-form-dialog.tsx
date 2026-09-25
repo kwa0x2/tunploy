@@ -16,7 +16,7 @@ import { DeployProgress } from "@/components/deploy-progress"
 import type { DeployState } from "@/components/deploy-progress"
 import { FormField } from "@/components/form-field"
 import { ApiError, api } from "@/lib/api"
-import type { Instance, InstanceInput, InstanceSettings } from "@/lib/api"
+import type { Instance, InstanceInput, InstanceSettings, Node } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Props = {
@@ -98,18 +98,33 @@ function InstanceForm(
   const [formError, setFormError] = useState("")
   const [deploy, setDeploy] = useState<DeployState | null>(null)
   const [deployPort, setDeployPort] = useState<number>()
+  const [nodes, setNodes] = useState<Node[]>([])
+  const [nodeId, setNodeId] = useState(0)
 
   useEffect(() => {
     if (!isCreate) return
+    api.nodes().then(setNodes).catch(() => {})
+  }, [isCreate])
+
+  useEffect(() => {
+    if (!isCreate) return
+    let stale = false
     api
-      .instanceDefaults()
+      .instanceDefaults(nodeId)
       .then((d) => {
+        if (stale) return
         setDefaults(d)
         // The host the admin reached the panel through is usually the public one.
-        if (!d.endpoint) setValues((v) => ({ ...v, endpoint: window.location.hostname }))
+        setValues((v) => ({
+          ...v,
+          endpoint: !d.endpoint ? window.location.hostname : v.endpoint === window.location.hostname ? "" : v.endpoint,
+        }))
       })
       .catch(() => {})
-  }, [isCreate])
+    return () => {
+      stale = true
+    }
+  }, [isCreate, nodeId])
 
   const needsEndpoint = isCreate && defaults !== undefined && !defaults.endpoint
   const set = (key: keyof Values) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -117,6 +132,7 @@ function InstanceForm(
 
   function build(): { input: InstanceInput; errors: Record<string, string> } {
     const input: InstanceInput = { name: values.name }
+    if (isCreate && nodeId) input.node_id = nodeId
     const errors: Record<string, string> = {}
 
     const int = (key: "listen_port" | "mtu" | "persistent_keepalive", fallback?: number) => {
@@ -264,6 +280,30 @@ function InstanceForm(
           aria-invalid={Boolean(fieldErrors.name)}
         />
       </FormField>
+
+      {nodes.length > 1 && (
+        <FormField
+          id="node"
+          label="Node"
+          error={fieldErrors.node_id}
+          hint="The machine the server runs on. It can't move later."
+        >
+          <select
+            id="node"
+            value={nodeId}
+            onChange={(e) => setNodeId(Number(e.target.value))}
+            className="border-input focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 h-8 w-full rounded-lg border bg-transparent px-2 text-base outline-none focus-visible:ring-3 md:text-sm"
+          >
+            {nodes.map((n) => (
+              <option key={n.id} value={n.id} disabled={!n.local && n.status.state !== "online"}>
+                {n.name}
+                {n.local ? "" : ` (${n.host})`}
+                {!n.local && n.status.state !== "online" ? ` · ${n.status.state}` : ""}
+              </option>
+            ))}
+          </select>
+        </FormField>
+      )}
 
       {needsEndpoint && endpointField}
 

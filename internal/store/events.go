@@ -16,6 +16,7 @@ type Event struct {
 	InstanceName string    `json:"instance_name,omitempty"`
 	PeerID       int64     `json:"peer_id,omitempty"`
 	PeerName     string    `json:"peer_name,omitempty"`
+	NodeName     string    `json:"node_name,omitempty"`
 	IP           string    `json:"ip,omitempty"`
 	Country      string    `json:"country,omitempty"`
 	Detail       string    `json:"detail,omitempty"`
@@ -45,9 +46,9 @@ func (s *Store) AddEvent(ctx context.Context, e Event) error {
 		e.CreatedAt = time.Now()
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO events (created_at, kind, instance_id, instance_name, peer_id, peer_name, ip, country, detail)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.CreatedAt.Unix(), e.Kind, nullID(e.InstanceID), e.InstanceName, nullID(e.PeerID), e.PeerName,
+		`INSERT INTO events (created_at, kind, instance_id, instance_name, peer_id, peer_name, node_name, ip, country, detail)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.CreatedAt.Unix(), e.Kind, nullID(e.InstanceID), e.InstanceName, nullID(e.PeerID), e.PeerName, e.NodeName,
 		e.IP, e.Country, e.Detail)
 	if err != nil {
 		return fmt.Errorf("add event: %w", err)
@@ -81,7 +82,7 @@ func (s *Store) Events(ctx context.Context, f EventFilter) ([]Event, error) {
 	args = append(args, f.Limit)
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, created_at, kind, instance_id, instance_name, peer_id, peer_name, ip, country, detail
+		`SELECT id, created_at, kind, instance_id, instance_name, peer_id, peer_name, node_name, ip, country, detail
 		 FROM events WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
@@ -93,7 +94,7 @@ func (s *Store) Events(ctx context.Context, f EventFilter) ([]Event, error) {
 		var e Event
 		var at int64
 		var instanceID, peerID sql.NullInt64
-		if err := rows.Scan(&e.ID, &at, &e.Kind, &instanceID, &e.InstanceName, &peerID, &e.PeerName,
+		if err := rows.Scan(&e.ID, &at, &e.Kind, &instanceID, &e.InstanceName, &peerID, &e.PeerName, &e.NodeName,
 			&e.IP, &e.Country, &e.Detail); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}

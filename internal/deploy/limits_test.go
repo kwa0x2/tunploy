@@ -48,7 +48,7 @@ func TestWatchEnforcesLimits(t *testing.T) {
 	}
 	watch := func() {
 		t.Helper()
-		if err := f.m.watchInstance(ctx, in); err != nil {
+		if err := f.m.watchInstance(ctx, f.m.local, in); err != nil {
 			t.Fatal(err)
 		}
 	}

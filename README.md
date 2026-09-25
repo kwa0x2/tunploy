@@ -13,6 +13,7 @@ Tunploy runs as a single Docker container on your Linux server. From its web pan
 ## Features
 
 - **One-click VPN servers.** Each WireGuard server runs in its own container, on its own UDP port, with its own DNS, MTU, keepalive and allowed IPs.
+- **More machines from one panel.** Add another VPS with its SSH login and run VPN servers there too; nothing is installed on it but Docker.
 - **Devices.** Add a device and scan its QR code with the WireGuard app, or download its `.conf`. Turn devices off, give them a monthly data limit or an expiry date.
 - **Live status and usage.** See which devices are online, from which country, and their daily and monthly traffic.
 - **Activity log.** Connections, changes and sign-ins, in one place.
@@ -51,6 +52,7 @@ Open `http://YOUR_SERVER_IP:3000`, sign in, and [create your first VPN](#create-
 - [Using the panel](#using-the-panel)
   - [Sign in](#sign-in)
   - [Create your first VPN](#create-your-first-vpn)
+  - [More servers (nodes)](#more-servers-nodes)
   - [HTTPS](#https)
   - [Two-factor authentication](#two-factor-authentication)
   - [Email notifications](#email-notifications)
@@ -154,6 +156,25 @@ Out of the box the panel serves plain HTTP, so your password and session travel 
 3. Connect. The peer shows up as **Online** within a few seconds.
 
 The endpoint that clients connect to comes from **Settings → General**. If the install script detected the wrong address, change it there before creating servers. Existing servers keep their own endpoint, which you can change under each server's settings.
+
+### More servers (nodes)
+
+One panel can run VPN servers on other machines too, say one in Frankfurt and one in New York. Each machine is a node; the panel's own is always the first.
+
+1. Go to **Nodes → Add node**. Enter a name, the machine's IP address, its SSH port and a user: `root`, or one that can run `sudo` without a password.
+2. Sign in with a password or a private key. The panel uses it once, to add its own SSH key to that user's `~/.ssh/authorized_keys`, and does not keep it. If you would rather not hand over a login at all, choose **Panel key**, copy the key shown, add it to `authorized_keys` yourself, and continue.
+3. The panel shows the machine's host key fingerprint. Compare it with the output of `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the machine, then choose **Trust and set up**. The key is pinned: if it ever changes, the panel refuses to connect.
+4. The panel installs Docker if it is missing, checks that the kernel supports WireGuard and builds the WireGuard image there. Then the node is ready. When you create a server, pick the node it should run on; its endpoint defaults to the node's address.
+
+Nothing else is installed on the node. The panel keeps one SSH connection to each node and talks to its Docker over it, the same way it does locally. It creates the VPN containers, updates their configs when devices change, reads connection and traffic stats, and streams logs. The database stays on the panel, so everything in the rest of this guide works the same for servers on any node: activity log, usage, limits, notifications and backups.
+
+The machine needs its SSH port reachable from the panel, and the servers' UDP ports open to the internet, as on the panel's own machine.
+
+**When a node goes offline**, its VPN servers keep running. The panel shows the node as offline, logs it and emails you if you get server notifications. Changes you make in the meantime, such as new devices, are saved and applied once the panel reaches the node again. If a node is gone for good, **Remove node** still works: the panel then only forgets it.
+
+**Removing a node** that is online deletes its VPN servers and their devices, removes the containers and `/var/lib/tunploy` from the machine, and takes the panel's key out of `authorized_keys`. Docker stays installed.
+
+The panel's SSH key lives in its database and is part of every backup, so a restored panel can reach its nodes again and rebuilds their servers when it does. Anyone with the panel, or with an unencrypted backup, can log in to your nodes as that user.
 
 ### HTTPS
 
@@ -346,6 +367,8 @@ The panel container reads these environment variables. With the install script, 
 **The panel does not come up.** Check its logs with `tunploy logs` (or `docker logs tunploy`). `permission denied` on `docker.sock` means the socket is not mounted, or a rootless Docker is in use.
 
 **A server shows as stopped or keeps restarting.** Open the server and choose **View logs**. `RTNETLINK answers: Operation not supported` means the host kernel has no WireGuard module. Run `sudo modprobe wireguard`; if that fails, the VPS type (often OpenVZ or LXC) does not support WireGuard.
+
+**A node stays offline.** The card on the **Nodes** page shows the SSH error. Check that the panel can reach the node's SSH port (`nc -vz NODE_IP 22` from the panel's server), that the user can still run `sudo` without a password, and that the panel's key is still in `~/.ssh/authorized_keys`. `the server's host key changed` means the machine was reinstalled or something is in between; if you reinstalled it, remove the node and add it again.
 
 **The peer never comes online.** The UDP port is almost always blocked by the provider's firewall. Also check that the endpoint in the client config is the server's public address and not `localhost` or a private IP.
 

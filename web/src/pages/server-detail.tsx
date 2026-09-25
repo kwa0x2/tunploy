@@ -6,6 +6,7 @@ import {
   ChartColumn,
   Download,
   Gauge,
+  HardDrive,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -89,6 +90,7 @@ function ServerDetail({ id }: { id: number }) {
     pollMs,
   )
 
+  const nodes = useResource(api.nodes, 30_000)
   const [pending, setPending] = useState<Action | null>(null)
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -128,6 +130,8 @@ function ServerDetail({ id }: { id: number }) {
 
   const { state } = current.status
   const up = state === "running" || state === "restarting"
+  const node = current.node_id ? nodes.data?.find((n) => n.id === current.node_id) : undefined
+  const nodeOffline = current.status.error === "node is offline"
 
   return (
     <>
@@ -146,19 +150,29 @@ function ServerDetail({ id }: { id: number }) {
             <InstanceStatus state={state} />
           </span>
         }
-        description={<span className="font-mono text-xs">{endpointOf(current)}</span>}
+        description={
+          <span className="flex flex-wrap items-center gap-x-2">
+            <span className="font-mono text-xs">{endpointOf(current)}</span>
+            {node && (
+              <Link to="/nodes" className="hover:text-foreground inline-flex items-center gap-1 text-xs">
+                <HardDrive className="size-3.5" />
+                {node.name}
+              </Link>
+            )}
+          </span>
+        }
         actions={
           <div className="flex items-center gap-2">
             {up ? (
-              <ActionButton action="stop" pending={pending} onRun={run} icon={<Square />}>
+              <ActionButton action="stop" pending={pending} disabled={nodeOffline} onRun={run} icon={<Square />}>
                 Stop
               </ActionButton>
             ) : (
-              <ActionButton action="start" pending={pending} onRun={run} icon={<Play />}>
+              <ActionButton action="start" pending={pending} disabled={nodeOffline} onRun={run} icon={<Play />}>
                 {state === "not_deployed" ? "Deploy" : "Start"}
               </ActionButton>
             )}
-            <ActionButton action="restart" pending={pending} onRun={run} icon={<RotateCw />}>
+            <ActionButton action="restart" pending={pending} disabled={nodeOffline} onRun={run} icon={<RotateCw />}>
               Restart
             </ActionButton>
             <DropdownMenu>
@@ -187,7 +201,17 @@ function ServerDetail({ id }: { id: number }) {
         }
       />
 
-      {current.status.error && (
+      {nodeOffline && (
+        <Alert className="mb-6">
+          <AlertTitle>{node ? `${node.name} is offline` : "The node is offline"}</AlertTitle>
+          <AlertDescription>
+            The panel can't reach the machine over SSH, so live stats are missing. The VPN keeps running there,
+            and changes you make now are applied as soon as the panel reaches it again.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {current.status.error && !nodeOffline && (
         <Alert variant="destructive" className="mb-6">
           <AlertTitle>The tunnel is not healthy</AlertTitle>
           <AlertDescription>
@@ -250,15 +274,16 @@ function ServerDetail({ id }: { id: number }) {
   )
 }
 
-function ActionButton({ action, pending, onRun, icon, children }: {
+function ActionButton({ action, pending, onRun, icon, children, disabled }: {
   action: Action
   pending: Action | null
   onRun: (action: Action) => void
   icon: ReactNode
   children: ReactNode
+  disabled?: boolean
 }) {
   return (
-    <Button variant="outline" disabled={pending !== null} onClick={() => onRun(action)}>
+    <Button variant="outline" disabled={disabled || pending !== null} onClick={() => onRun(action)}>
       {pending === action ? <Loader2 className="animate-spin" /> : icon}
       {children}
     </Button>

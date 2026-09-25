@@ -13,14 +13,37 @@ function stepsFor(port?: number): { step: ProvisionStep; label: string }[] {
   ]
 }
 
-export type DeployState =
-  | { status: "running"; done: ProvisionStep[] }
-  | { status: "ready"; done: ProvisionStep[] }
-  | { status: "failed"; done: ProvisionStep[]; error: unknown }
+export type StepState<S extends string> =
+  | { status: "running"; done: S[] }
+  | { status: "ready"; done: S[] }
+  | { status: "failed"; done: S[]; error: unknown }
+
+export type DeployState = StepState<ProvisionStep>
 
 export function DeployProgress({ state, port }: { state: DeployState; port?: number }) {
-  const steps = stepsFor(port)
+  return (
+    <StepProgress
+      steps={stepsFor(port)}
+      state={state}
+      ready="VPN is ready."
+      console="deploy"
+      hint={(current) =>
+        current === "image" ? "The first deploy builds the WireGuard image, which takes a few seconds." : undefined
+      }
+    />
+  )
+}
+
+export function StepProgress<S extends string>({ steps, state, ready, console, hint }: {
+  steps: { step: S; label: string }[]
+  state: StepState<S>
+  ready: string
+  // Names the error console, like a terminal tab.
+  console: string
+  hint?: (current: S) => string | undefined
+}) {
   const current = steps.find((s) => !state.done.includes(s.step))?.step
+  const note = state.status === "running" && current ? hint?.(current) : undefined
 
   return (
     <div className="space-y-4">
@@ -39,13 +62,13 @@ export function DeployProgress({ state, port }: { state: DeployState; port?: num
               )}
             >
               {done ? (
-                <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
+                <Check className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
               ) : failed ? (
-                <X className="size-4" />
+                <X className="size-4 shrink-0" />
               ) : active ? (
-                <Loader2 className="text-primary size-4 animate-spin" />
+                <Loader2 className="text-primary size-4 shrink-0 animate-spin" />
               ) : (
-                <Circle className="size-4" />
+                <Circle className="size-4 shrink-0" />
               )}
               {label}
             </li>
@@ -53,22 +76,16 @@ export function DeployProgress({ state, port }: { state: DeployState; port?: num
         })}
       </ol>
 
-      {state.status === "running" && current === "image" && (
-        <p className="text-muted-foreground text-xs">
-          The first deploy builds the WireGuard image, which takes a few seconds.
-        </p>
-      )}
+      {note && <p className="text-muted-foreground text-xs">{note}</p>}
       {state.status === "ready" && (
-        <p className="font-mono text-sm font-medium text-emerald-700 dark:text-emerald-400">
-          VPN is ready.
-        </p>
+        <p className="font-mono text-sm font-medium text-emerald-700 dark:text-emerald-400">{ready}</p>
       )}
-      {state.status === "failed" && <ErrorConsole error={state.error} />}
+      {state.status === "failed" && <ErrorConsole error={state.error} label={console} />}
     </div>
   )
 }
 
-function ErrorConsole({ error }: { error: unknown }) {
+function ErrorConsole({ error, label }: { error: unknown; label: string }) {
   const code = error instanceof ApiError ? error.code : "unknown_error"
   const message = error instanceof ApiError ? error.message : "Something went wrong."
   const log = error instanceof DeployError ? error.log : []
@@ -81,7 +98,7 @@ function ErrorConsole({ error }: { error: unknown }) {
           <span className="size-2.5 rounded-full bg-zinc-700" />
           <span className="size-2.5 rounded-full bg-zinc-700" />
         </span>
-        <span className="text-zinc-400">deploy</span>
+        <span className="text-zinc-400">{label}</span>
         <span className="ml-auto rounded bg-red-500/15 px-1.5 py-0.5 font-mono text-red-400">{code}</span>
       </div>
       <pre className="max-h-64 overflow-auto p-3 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">
@@ -89,7 +106,7 @@ function ErrorConsole({ error }: { error: unknown }) {
         {log.length > 0 && (
           <>
             {"\n\n"}
-            <span className="text-zinc-500"># container output</span>
+            <span className="text-zinc-500"># output</span>
             {"\n"}
             {log.join("\n")}
           </>

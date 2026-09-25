@@ -5,6 +5,7 @@ import { AppShell } from "@/components/layout/app-shell"
 import { ActivityPage } from "@/pages/activity"
 import { AdminMissingPage } from "@/pages/admin-missing"
 import { LoginPage } from "@/pages/login"
+import { NodesPage } from "@/pages/nodes"
 import { NotFoundPage } from "@/pages/not-found"
 import { OverviewPage } from "@/pages/overview"
 import { PeersPage } from "@/pages/peers"
@@ -53,6 +54,7 @@ function Routing() {
         <Route index element={<OverviewPage />} />
         <Route path="/servers" element={<ServersPage />} />
         <Route path="/servers/:id" element={<ServerDetailPage />} />
+        <Route path="/nodes" element={<NodesPage />} />
         <Route path="/peers" element={<PeersPage />} />
         <Route path="/activity" element={<ActivityPage />} />
         <Route path="/settings" element={<GeneralSettingsPage />} />

@@ -12,7 +12,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
 
-const instanceColumns = `id, name, address, listen_port, private_key, public_key, endpoint,
+const instanceColumns = `id, node_id, name, address, listen_port, private_key, public_key, endpoint,
 	dns, mtu, persistent_keepalive, client_allowed_ips, created_at, updated_at`
 
 const peerColumns = `id, instance_id, name, address, private_key, public_key, preshared_key,
@@ -25,10 +25,10 @@ type rowScanner interface {
 func (s *Store) CreateInstance(ctx context.Context, in wg.Instance) (*wg.Instance, error) {
 	now := time.Now().Unix()
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO wg_instances (name, address, listen_port, private_key, public_key, endpoint,
+		`INSERT INTO wg_instances (node_id, name, address, listen_port, private_key, public_key, endpoint,
 			dns, mtu, persistent_keepalive, client_allowed_ips, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		in.Name, in.Address.String(), in.ListenPort, in.PrivateKey.String(), in.PublicKey.String(),
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.NodeID, in.Name, in.Address.String(), in.ListenPort, in.PrivateKey.String(), in.PublicKey.String(),
 		in.Endpoint, joinList(in.DNS), in.MTU, in.PersistentKeepalive, joinList(in.ClientAllowedIPs),
 		now, now)
 	if err != nil {
@@ -233,7 +233,7 @@ func scanInstance(row rowScanner) (*wg.Instance, error) {
 		address, priv, pub, dns, allowedIPs string
 		created, updated                    int64
 	)
-	err := row.Scan(&in.ID, &in.Name, &address, &in.ListenPort, &priv, &pub, &in.Endpoint,
+	err := row.Scan(&in.ID, &in.NodeID, &in.Name, &address, &in.ListenPort, &priv, &pub, &in.Endpoint,
 		&dns, &in.MTU, &in.PersistentKeepalive, &allowedIPs, &created, &updated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -18,8 +18,10 @@ var (
 )
 
 type Instance struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID int64 `json:"id"`
+	// 0 is the panel's own machine.
+	NodeID int64  `json:"node_id"`
+	Name   string `json:"name"`
 	// The prefix length sets the subnet peers get addresses from.
 	Address    netip.Prefix `json:"address"`
 	ListenPort int          `json:"listen_port"`

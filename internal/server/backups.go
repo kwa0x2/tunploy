@@ -493,7 +493,16 @@ func (s *Server) restore(ctx context.Context, src io.Reader, name, passphrase, i
 	s.notifier.Configure(notifyConfig(stored))
 	s.applyDomain(s.closing, stored)
 
-	if err := s.deploy.Rebuild(ctx); err != nil {
+	// The backup brings its own nodes and SSH key; each node is rebuilt once
+	// the panel reaches it again.
+	if err := s.deploy.MarkRebuild(ctx); err != nil {
+		return res, err
+	}
+	if err := s.nodes.Reload(s.closing); err != nil {
+		slog.Error("reconnect nodes after restore", "error", err)
+		res.Warnings = append(res.Warnings, "could not reconnect the nodes: "+err.Error())
+	}
+	if err := s.deploy.Reconcile(ctx); err != nil {
 		slog.Error("rebuild wireguard containers after restore", "error", err)
 		res.Warnings = append(res.Warnings, "some VPN servers could not start: "+err.Error())
 	}

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Plus, Server } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -10,18 +10,24 @@ import { EmptyServers, NewServerDialog } from "@/components/new-server"
 import { PageHeader } from "@/components/page-header"
 import { useResource } from "@/hooks/use-resource"
 import { api } from "@/lib/api"
-import type { Instance } from "@/lib/api"
+import type { Instance, Node } from "@/lib/api"
 import { endpointOf, errorMessage } from "@/lib/format"
 
 export function ServersPage() {
   const { data: instances, error } = useResource(api.instances, 10_000)
+  const { data: nodes } = useResource(api.nodes, 30_000)
   const [creating, setCreating] = useState(false)
+  // Only worth naming once there is more than one machine.
+  const nodeOf = useMemo(() => {
+    const byId = new Map((nodes ?? []).map((n) => [n.id, n]))
+    return (id: number) => (byId.size > 1 ? byId.get(id) : undefined)
+  }, [nodes])
 
   return (
     <>
       <PageHeader
         title="Servers"
-        description="WireGuard instances running on this node."
+        description="WireGuard servers on this machine and your other nodes."
         actions={
           instances?.length ? (
             <Button onClick={() => setCreating(true)}>
@@ -51,7 +57,7 @@ export function ServersPage() {
       {instances && instances.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {instances.map((instance) => (
-            <ServerCard key={instance.id} instance={instance} />
+            <ServerCard key={instance.id} instance={instance} node={nodeOf(instance.node_id)} />
           ))}
         </div>
       )}
@@ -61,7 +67,7 @@ export function ServersPage() {
   )
 }
 
-function ServerCard({ instance }: { instance: Instance }) {
+function ServerCard({ instance, node }: { instance: Instance; node?: Node }) {
   return (
     <Link to={`/servers/${instance.id}`} className="group rounded-xl outline-none">
       <Card className="group-hover:ring-primary/30 group-focus-visible:ring-ring h-full transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-amber-500/10 motion-reduce:transform-none">
@@ -75,6 +81,12 @@ function ServerCard({ instance }: { instance: Instance }) {
           <InstanceStatus state={instance.status.state} />
         </CardHeader>
         <CardContent className="text-muted-foreground grid grid-cols-2 gap-y-1 text-sm">
+          {node && (
+            <>
+              <span>Node</span>
+              <span className="text-foreground truncate text-right">{node.name}</span>
+            </>
+          )}
           <span>Endpoint</span>
           <span className="text-foreground truncate text-right font-mono text-xs leading-5">
             {endpointOf(instance)}

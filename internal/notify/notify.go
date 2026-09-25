@@ -27,7 +27,8 @@ type Group struct {
 }
 
 var Groups = []Group{
-	{ID: "servers", Kinds: []string{"server.created", "server.deploy_failed", "server.deleted", "server.down", "server.recovered"}},
+	{ID: "servers", Kinds: []string{"server.created", "server.deploy_failed", "server.deleted", "server.down", "server.recovered",
+		"node.added", "node.deleted", "node.offline", "node.online"}},
 	{ID: "devices", Kinds: []string{"device.created", "device.deleted", "device.enabled", "device.disabled"}},
 	{ID: "limits", Kinds: []string{"device.limit_reached", "device.expired", "device.unblocked"}},
 	{ID: "failed_logins", Kinds: []string{"auth.login_failed"}},
@@ -226,6 +227,7 @@ func writeEvent(b *strings.Builder, e store.Event) {
 		}
 	}
 	line("Time", at.In(time.Local).Format("2 Jan 2006 15:04:05 MST"))
+	line("Node", e.NodeName)
 	line("Server", e.InstanceName)
 	line("Device", e.PeerName)
 	ip := e.IP
@@ -279,6 +281,16 @@ func Describe(e store.Event) string {
 		return "Server " + server + " is down"
 	case "server.recovered":
 		return "Server " + server + " is running again"
+	case "node.added":
+		return "Node " + quote(e.NodeName) + " was added"
+	case "node.renamed":
+		return "A node was renamed to " + quote(e.NodeName)
+	case "node.deleted":
+		return "Node " + quote(e.NodeName) + " was removed"
+	case "node.offline":
+		return "Node " + quote(e.NodeName) + " is offline"
+	case "node.online":
+		return "Node " + quote(e.NodeName) + " is back online"
 	case "settings.updated":
 		return "Panel settings changed"
 	case "settings.domain_changed":

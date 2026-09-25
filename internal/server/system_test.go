@@ -17,6 +17,10 @@ type fakeDocker struct {
 
 func (f fakeDocker) Ping(context.Context) (docker.Info, error) { return f.info, f.err }
 
+func (f fakeDocker) Daemon(context.Context) (docker.Daemon, error) {
+	return docker.Daemon{ID: "local", Version: f.info.Version}, f.err
+}
+
 func loggedIn(t *testing.T, s *Server) *http.Cookie {
 	t.Helper()
 	createAdmin(t, s)
