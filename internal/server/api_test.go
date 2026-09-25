@@ -426,14 +426,47 @@ func TestAPIEvents(t *testing.T) {
 func TestAPIRateLimit(t *testing.T) {
 	p := newPanel(t)
 	token := p.apiKey("busy", "servers:read")
-	for range apiRateBurst {
-		if rec := p.api(token, "GET", "/api/v1/servers", nil); rec.Code != http.StatusOK {
-			t.Fatalf("within the burst: %d", rec.Code)
+	// The bucket refills on the wall clock while the loop runs, which on a
+	// slow runner lets a few extra requests through; the exact counts are
+	// checked in TestRateLimiter.
+	var rec *httptest.ResponseRecorder
+	for sent := 0; ; sent++ {
+		rec = p.api(token, "GET", "/api/v1/servers", nil)
+		if rec.Code != http.StatusOK {
+			if sent < apiRateBurst {
+				t.Fatalf("within the burst, request %d: %d", sent+1, rec.Code)
+			}
+			break
+		}
+		if sent > 2*apiRateBurst {
+			t.Fatal("never rate limited")
 		}
 	}
-	rec := p.api(token, "GET", "/api/v1/servers", nil)
 	p.wantError(rec, http.StatusTooManyRequests, "rate_limited")
 	if rec.Header().Get("Retry-After") == "" {
 		t.Fatal("429 without Retry-After")
+	}
+}
+
+func TestRateLimiter(t *testing.T) {
+	l := newRateLimiter()
+	start := time.Now()
+	for i := range apiRateBurst {
+		if ok, _ := l.allow(1, start); !ok {
+			t.Fatalf("request %d within the burst was refused", i+1)
+		}
+	}
+	ok, wait := l.allow(1, start)
+	if ok || wait != time.Second/apiRatePerSec {
+		t.Fatalf("past the burst: ok=%v wait=%v", ok, wait)
+	}
+	if ok, _ := l.allow(2, start); !ok {
+		t.Fatal("another key shares the bucket")
+	}
+	if ok, _ := l.allow(1, start.Add(time.Second/apiRatePerSec)); !ok {
+		t.Fatal("no token after the refill interval")
+	}
+	if ok, _ := l.allow(1, start.Add(time.Second/apiRatePerSec)); ok {
+		t.Fatal("refill gave more than one token")
 	}
 }
