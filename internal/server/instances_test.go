@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/docker/dockertest"
 )
@@ -211,7 +210,7 @@ func TestFailedDeployRollsBack(t *testing.T) {
 	if len(list) != 0 {
 		t.Fatalf("instance should be rolled back, list = %+v", list)
 	}
-	if _, ok := p.fake.Container(deploy.ContainerName(1)); ok {
+	if _, ok := p.fake.Container(p.s.deploy.ContainerName(1)); ok {
 		t.Fatal("container should be removed on rollback")
 	}
 
@@ -325,7 +324,7 @@ func TestUpdateInstance(t *testing.T) {
 	p := newPanel(t)
 	in := p.createInstance(map[string]any{"name": "Home"})
 	path := fmt.Sprintf("/api/instances/%d", in.ID)
-	name := deploy.ContainerName(in.ID)
+	name := p.s.deploy.ContainerName(in.ID)
 	before, _ := p.fake.Container(name)
 
 	var got instanceJSON
@@ -370,7 +369,7 @@ func TestInstanceActions(t *testing.T) {
 		t.Fatalf("after restart: %+v", got.Status)
 	}
 
-	p.fake.RemoveContainer(t.Context(), deploy.ContainerName(in.ID))
+	p.fake.RemoveContainer(t.Context(), p.s.deploy.ContainerName(in.ID))
 	p.want(p.do("POST", base+"/start", nil), http.StatusOK, &got)
 	if got.Status.State != "running" {
 		t.Fatalf("start should redeploy a missing container: %+v", got.Status)
@@ -384,7 +383,7 @@ func TestDeleteInstance(t *testing.T) {
 	path := fmt.Sprintf("/api/instances/%d", in.ID)
 
 	p.want(p.do("DELETE", path, nil), http.StatusNoContent, nil)
-	if _, ok := p.fake.Container(deploy.ContainerName(in.ID)); ok {
+	if _, ok := p.fake.Container(p.s.deploy.ContainerName(in.ID)); ok {
 		t.Fatal("container should be gone")
 	}
 	p.wantError(p.do("GET", path, nil), http.StatusNotFound, "not_found")

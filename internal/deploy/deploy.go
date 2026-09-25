@@ -32,9 +32,12 @@ var imageFS embed.FS
 const (
 	LabelInstance = "io.tunploy.instance"
 
-	containerPrefix = "tunploy-wg-"
-	iface           = "wg0"
-	stopTimeout     = 10 * time.Second
+	// Panels sharing a Docker daemon need different prefixes. It must end in
+	// "-" so a name splits back into exactly one prefix and instance ID.
+	DefaultContainerPrefix = "tunploy-wg-"
+
+	iface       = "wg0"
+	stopTimeout = 10 * time.Second
 )
 
 type Docker interface {
@@ -54,6 +57,7 @@ type Manager struct {
 	store   *store.Store
 	docker  Docker
 	dataDir string
+	prefix  string
 	image   string
 	files   map[string][]byte
 
@@ -87,7 +91,7 @@ type PeerBlock struct {
 	Month  wg.Traffic
 }
 
-func New(st *store.Store, dk Docker, dataDir string) (*Manager, error) {
+func New(st *store.Store, dk Docker, dataDir, prefix string) (*Manager, error) {
 	files := map[string][]byte{}
 	err := fs.WalkDir(imageFS, "image", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -105,6 +109,7 @@ func New(st *store.Store, dk Docker, dataDir string) (*Manager, error) {
 		store:    st,
 		docker:   dk,
 		dataDir:  dataDir,
+		prefix:   prefix,
 		image:    imageTag(files),
 		files:    files,
 		activity: activity{peers: map[int64]map[wg.Key]sample{}},
@@ -132,8 +137,15 @@ func imageTag(files map[string][]byte) string {
 
 func (m *Manager) Image() string { return m.image }
 
-func ContainerName(instanceID int64) string {
-	return containerPrefix + strconv.FormatInt(instanceID, 10)
+func (m *Manager) ContainerName(instanceID int64) string {
+	return m.prefix + strconv.FormatInt(instanceID, 10)
+}
+
+// Another panel on the same daemon labels its containers the same way, so the
+// name is what tells ours apart.
+func (m *Manager) owns(ct docker.Container) bool {
+	id, ok := ct.Labels[LabelInstance]
+	return ok && ct.Name == m.prefix+id
 }
 
 func (m *Manager) ConfigDir(instanceID int64) string {
@@ -178,7 +190,7 @@ func (m *Manager) deploy(ctx context.Context, instanceID int64, start bool, prog
 		return err
 	}
 
-	name := ContainerName(in.ID)
+	name := m.ContainerName(in.ID)
 	if err := m.docker.RemoveContainer(ctx, name); err != nil && !errors.Is(err, docker.ErrNotFound) {
 		return err
 	}
@@ -271,7 +283,7 @@ func (m *Manager) Remove(ctx context.Context, instanceID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	err := m.docker.RemoveContainer(ctx, ContainerName(instanceID))
+	err := m.docker.RemoveContainer(ctx, m.ContainerName(instanceID))
 	if err != nil && !errors.Is(err, docker.ErrNotFound) {
 		return err
 	}
@@ -298,7 +310,7 @@ func (m *Manager) Rebuild(ctx context.Context) error {
 		return err
 	}
 	for _, ct := range containers {
-		if _, ok := ct.Labels[LabelInstance]; !ok {
+		if !m.owns(ct) {
 			continue
 		}
 		if err := m.docker.RemoveContainer(ctx, ct.Name); err != nil && !errors.Is(err, docker.ErrNotFound) {
@@ -504,7 +516,7 @@ func (m *Manager) Logs(ctx context.Context, instanceID int64, tail int, follow b
 
 // container returns nil, nil when there is none.
 func (m *Manager) container(ctx context.Context, instanceID int64) (*docker.Container, error) {
-	ct, err := m.docker.InspectContainer(ctx, ContainerName(instanceID))
+	ct, err := m.docker.InspectContainer(ctx, m.ContainerName(instanceID))
 	if errors.Is(err, docker.ErrNotFound) {
 		return nil, nil
 	}

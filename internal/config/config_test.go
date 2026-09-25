@@ -47,3 +47,26 @@ func TestTrustedProxies(t *testing.T) {
 		t.Fatal("a hostname must be rejected")
 	}
 }
+
+func TestContainerPrefix(t *testing.T) {
+	t.Setenv("TUNPLOY_DATA_DIR", t.TempDir())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContainerPrefix != "tunploy-wg-" {
+		t.Fatalf("default = %q", cfg.ContainerPrefix)
+	}
+
+	t.Setenv("TUNPLOY_CONTAINER_PREFIX", "tunploy-dev-")
+	if cfg, err = Load(); err != nil || cfg.ContainerPrefix != "tunploy-dev-" {
+		t.Fatalf("got %q, %v", cfg.ContainerPrefix, err)
+	}
+
+	for _, bad := range []string{"tunploy-dev", "-wg-", "tunploy wg-", "tunploy/wg-"} {
+		t.Setenv("TUNPLOY_CONTAINER_PREFIX", bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("%q must be rejected", bad)
+		}
+	}
+}

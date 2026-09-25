@@ -107,13 +107,13 @@ export function NotificationsCard({ settings, onSaved }: {
   }
 
   return (
-    <Card>
-      <form onSubmit={handleSubmit} noValidate className="contents">
+    <form onSubmit={handleSubmit} noValidate className="grid items-start gap-6 xl:grid-cols-2">
+      <Card>
         <CardHeader>
           <CardTitle>Email notifications</CardTitle>
           <CardDescription>
-            Get an email when something happens on your VPN. Uses any mail provider that offers
-            SMTP; events close together arrive as one email.
+            Get an email when something happens on your VPN. Events close together arrive as one
+            email.
           </CardDescription>
           <CardAction>
             <Switch
@@ -123,8 +123,40 @@ export function NotificationsCard({ settings, onSaved }: {
             />
           </CardAction>
         </CardHeader>
+        <CardContent>
+          <Section title="Send an email for">
+            {errors.events && <p className="text-destructive text-sm">{errors.events}</p>}
+            <ul className="divide-y rounded-lg border">
+              {groups.map((g) => {
+                const on = form.events.includes(g.id)
+                return (
+                  <li key={g.id} className="flex items-center justify-between gap-4 px-3 py-2.5">
+                    <label htmlFor={`notify-${g.id}`} className="min-w-0 cursor-pointer">
+                      <span className="block text-sm font-medium">{g.label}</span>
+                      <span className="text-muted-foreground block text-xs">{g.hint}</span>
+                    </label>
+                    <Switch
+                      id={`notify-${g.id}`}
+                      checked={on}
+                      onCheckedChange={(checked) =>
+                        set("events", checked ? [...form.events, g.id] : form.events.filter((e) => e !== g.id))
+                      }
+                    />
+                  </li>
+                )
+              })}
+            </ul>
+          </Section>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Mail server</CardTitle>
+          <CardDescription>Works with any mail provider that offers SMTP.</CardDescription>
+        </CardHeader>
         <CardContent className="space-y-6">
-          <Section title="Mail server">
+          <Section title="Server">
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_7rem]">
               <FormField id="smtp-host" label="SMTP server" error={errors.host}>
                 <Input
@@ -220,30 +252,6 @@ export function NotificationsCard({ settings, onSaved }: {
             </FormField>
           </Section>
 
-          <Section title="Send an email for">
-            {errors.events && <p className="text-destructive text-sm">{errors.events}</p>}
-            <ul className="divide-y rounded-lg border">
-              {groups.map((g) => {
-                const on = form.events.includes(g.id)
-                return (
-                  <li key={g.id} className="flex items-center justify-between gap-4 px-3 py-2.5">
-                    <label htmlFor={`notify-${g.id}`} className="min-w-0 cursor-pointer">
-                      <span className="block text-sm font-medium">{g.label}</span>
-                      <span className="text-muted-foreground block text-xs">{g.hint}</span>
-                    </label>
-                    <Switch
-                      id={`notify-${g.id}`}
-                      checked={on}
-                      onCheckedChange={(checked) =>
-                        set("events", checked ? [...form.events, g.id] : form.events.filter((e) => e !== g.id))
-                      }
-                    />
-                  </li>
-                )
-              })}
-            </ul>
-          </Section>
-
           <DeliveryStatus status={settings.status} />
         </CardContent>
         <CardFooter className="flex-wrap justify-end gap-2">
@@ -256,8 +264,8 @@ export function NotificationsCard({ settings, onSaved }: {
             Save
           </Button>
         </CardFooter>
-      </form>
-    </Card>
+      </Card>
+    </form>
   )
 }
 

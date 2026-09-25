@@ -158,6 +158,8 @@ export function RestoreDialog({ target, onOpenChange, panelEncrypted, onRestored
   )
 }
 
+const askAgainCodes = new Set(["passphrase_required", "wrong_passphrase"])
+
 function RestoreForm({ target, panelEncrypted, busy, setBusy, onRestored, onCancel }: {
   target: RestoreTarget
   panelEncrypted: boolean
@@ -179,7 +181,7 @@ function RestoreForm({ target, panelEncrypted, busy, setBusy, onRestored, onCanc
     try {
       onRestored(await target.run(passphrase || undefined))
     } catch (err) {
-      if (err instanceof ApiError && (err.code === "passphrase_required" || err.code === "wrong_passphrase")) {
+      if (err instanceof ApiError && askAgainCodes.has(err.code)) {
         setAskPassphrase(true)
         setPassphraseError(
           err.code === "wrong_passphrase" && !passphrase

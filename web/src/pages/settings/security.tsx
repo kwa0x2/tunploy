@@ -27,7 +27,7 @@ export function SecuritySettingsPage() {
   return (
     <>
       <PageHeader title="Security" description="Protect the panel and your account." />
-      <div className="grid max-w-2xl gap-6">
+      <div className="grid max-w-6xl items-start gap-6 xl:grid-cols-2">
         <SecurityCard httpsUrl={httpsUrl.data ?? ""} />
         <PasswordCard />
       </div>

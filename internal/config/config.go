@@ -7,21 +7,23 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
 type Config struct {
-	Listen        string
-	DataDir       string
-	DockerHost    string
-	PublicHost    string
-	SessionTTL    time.Duration
-	SecureCookies bool
-	GeoIP         bool
-	UpdateCheck   bool
-	LogLevel      slog.Level
+	Listen          string
+	DataDir         string
+	DockerHost      string
+	ContainerPrefix string
+	PublicHost      string
+	SessionTTL      time.Duration
+	SecureCookies   bool
+	GeoIP           bool
+	UpdateCheck     bool
+	LogLevel        slog.Level
 
 	// HTTPSListen is empty when HTTPS is off; the domain itself is set in the panel.
 	HTTPSListen    string
@@ -34,17 +36,18 @@ func (c Config) DBPath() string { return filepath.Join(c.DataDir, "tunploy.db") 
 
 func Load() (Config, error) {
 	cfg := Config{
-		Listen:        env("TUNPLOY_LISTEN", ":3000"),
-		DataDir:       env("TUNPLOY_DATA_DIR", "/var/lib/tunploy"),
-		DockerHost:    env("TUNPLOY_DOCKER_HOST", ""),
-		PublicHost:    env("TUNPLOY_PUBLIC_HOST", ""),
-		SessionTTL:    7 * 24 * time.Hour,
-		SecureCookies: false,
-		GeoIP:         true,
-		UpdateCheck:   true,
-		HTTPSListen:   env("TUNPLOY_HTTPS_LISTEN", ":443"),
-		HTTPListen:    env("TUNPLOY_HTTP_LISTEN", ":80"),
-		ACMEDirectory: env("TUNPLOY_ACME_DIRECTORY", ""),
+		Listen:          env("TUNPLOY_LISTEN", ":3000"),
+		DataDir:         env("TUNPLOY_DATA_DIR", "/var/lib/tunploy"),
+		DockerHost:      env("TUNPLOY_DOCKER_HOST", ""),
+		ContainerPrefix: env("TUNPLOY_CONTAINER_PREFIX", "tunploy-wg-"),
+		PublicHost:      env("TUNPLOY_PUBLIC_HOST", ""),
+		SessionTTL:      7 * 24 * time.Hour,
+		SecureCookies:   false,
+		GeoIP:           true,
+		UpdateCheck:     true,
+		HTTPSListen:     env("TUNPLOY_HTTPS_LISTEN", ":443"),
+		HTTPListen:      env("TUNPLOY_HTTP_LISTEN", ":80"),
+		ACMEDirectory:   env("TUNPLOY_ACME_DIRECTORY", ""),
 	}
 
 	if raw := env("TUNPLOY_SESSION_TTL", ""); raw != "" {
@@ -100,6 +103,12 @@ func Load() (Config, error) {
 		cfg.TrustedProxies = prefixes
 	}
 
+	// The ending "-" keeps two prefixes from producing the same name, since the
+	// instance ID after it is only digits.
+	if !containerPrefix.MatchString(cfg.ContainerPrefix) {
+		return Config{}, fmt.Errorf("TUNPLOY_CONTAINER_PREFIX: %q must be letters, digits, '_', '.' or '-' and end with '-'", cfg.ContainerPrefix)
+	}
+
 	lvl, err := parseLevel(env("TUNPLOY_LOG_LEVEL", "info"))
 	if err != nil {
 		return Config{}, err
@@ -114,6 +123,8 @@ func Load() (Config, error) {
 
 	return cfg, nil
 }
+
+var containerPrefix = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*-$`)
 
 func env(key, fallback string) string {
 	if v, ok := os.LookupEnv(key); ok && v != "" {

@@ -41,7 +41,7 @@ func newTestServerWithDeploy(t *testing.T, dk Docker, fk *dockertest.Fake) (*Ser
 	}
 	t.Cleanup(func() { st.Close() })
 
-	mgr, err := deploy.New(st, fk, t.TempDir())
+	mgr, err := deploy.New(st, fk, t.TempDir(), deploy.DefaultContainerPrefix)
 	if err != nil {
 		t.Fatalf("new deploy manager: %v", err)
 	}

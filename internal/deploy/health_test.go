@@ -17,7 +17,7 @@ func TestWatchReportsServerHealth(t *testing.T) {
 
 	set := func(state string, code int) {
 		t.Helper()
-		ct, _ := f.docker.Container(ContainerName(in.ID))
+		ct, _ := f.docker.Container(f.m.ContainerName(in.ID))
 		ct.State, ct.ExitCode = state, code
 		f.docker.Add(ct)
 		f.m.watchInstance(ctx, in)

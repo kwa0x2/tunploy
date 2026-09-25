@@ -42,7 +42,7 @@ func (m *Manager) Statuses(ctx context.Context, instanceIDs []int64) map[int64]S
 		byName[ct.Name] = ct
 	}
 	for _, id := range instanceIDs {
-		ct, ok := byName[ContainerName(id)]
+		ct, ok := byName[m.ContainerName(id)]
 		if !ok {
 			out[id] = Status{State: StateNotDeployed}
 			continue
@@ -100,7 +100,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	var errs []error
 	known := make(map[string]bool, len(instances))
 	for _, in := range instances {
-		name := ContainerName(in.ID)
+		name := m.ContainerName(in.ID)
 		known[name] = true
 
 		ct, exists := byName[name]
@@ -120,7 +120,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	}
 
 	for _, ct := range containers {
-		if _, ok := ct.Labels[LabelInstance]; !ok || known[ct.Name] {
+		if !m.owns(ct) || known[ct.Name] {
 			continue
 		}
 		slog.Info("removing orphaned wireguard container", "container", ct.Name)

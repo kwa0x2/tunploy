@@ -23,7 +23,7 @@ func TestInstanceLogs(t *testing.T) {
 	p.wantError(p.do("GET", path+"?tail=0", nil), http.StatusBadRequest, "invalid_request")
 	p.wantError(p.do("GET", path+"?tail=abc", nil), http.StatusBadRequest, "invalid_request")
 
-	p.fake.RemoveContainer(t.Context(), "tunploy-wg-1")
+	p.fake.RemoveContainer(t.Context(), p.s.deploy.ContainerName(1))
 	p.wantError(p.do("GET", path, nil), http.StatusConflict, "conflict")
 
 	p.wantError(p.do("GET", "/api/instances/999/logs", nil), http.StatusNotFound, "not_found")

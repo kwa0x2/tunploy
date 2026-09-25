@@ -63,7 +63,7 @@ func (db *DB) Country(addr netip.Addr) string {
 
 func (db *DB) Run(ctx context.Context) {
 	for {
-		if err := db.refresh(ctx); err != nil && ctx.Err() == nil {
+		if err := db.refresh(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
 			slog.Warn("update geoip database", "error", err)
 		}
 		select {
@@ -74,14 +74,15 @@ func (db *DB) Run(ctx context.Context) {
 	}
 }
 
-func (db *DB) refresh(ctx context.Context) error {
-	if info, err := os.Stat(db.path); err == nil && time.Since(info.ModTime()) < maxAge {
+func (db *DB) refresh(ctx context.Context, now time.Time) error {
+	if info, err := os.Stat(db.path); err == nil && now.Sub(info.ModTime()) < maxAge {
 		return nil
 	}
 	// A new month's file is published a few days in, so fall back a month.
-	now := time.Now().UTC()
+	// From the 1st: on the 31st, AddDate(0, -1, 0) can land in the same month.
+	first := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	var err error
-	for _, month := range []time.Time{now, now.AddDate(0, -1, 0)} {
+	for _, month := range []time.Time{first, first.AddDate(0, -1, 0)} {
 		if err = db.download(ctx, month.Format("2006-01")); err == nil {
 			slog.Info("geoip database updated", "month", month.Format("2006-01"))
 			return db.load()

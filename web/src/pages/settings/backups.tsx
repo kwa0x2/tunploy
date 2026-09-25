@@ -13,7 +13,7 @@ export function BackupsSettingsPage() {
   return (
     <>
       <PageHeader title="Backups" description="Save the whole panel, keep copies in S3 and restore them." />
-      <div className="grid max-w-2xl gap-6">
+      <div className="grid max-w-6xl items-start gap-6 xl:grid-cols-2">
         {backups.data ? (
           <>
             <BackupsCard

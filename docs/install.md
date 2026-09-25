@@ -272,6 +272,7 @@ docker exec -it tunploy tunploy admin create
 | `TUNPLOY_HTTPS_LISTEN`, `TUNPLOY_HTTP_LISTEN` | `:443`, `:80` | Where HTTPS and its redirect listen inside the container. |
 | `TUNPLOY_ACME_DIRECTORY` | Let's Encrypt | ACME directory URL, for example the Let's Encrypt staging server while testing. |
 | `TUNPLOY_TRUSTED_PROXIES` | empty | Reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed. |
+| `TUNPLOY_CONTAINER_PREFIX` | `tunploy-wg-` | Name prefix of the VPN containers, which are named prefix plus server ID. Give each panel sharing one Docker daemon its own, ending in `-`; a panel only ever touches containers with its prefix. Changing it on a running panel leaves the old containers behind. |
 | `TUNPLOY_SECURE_COOKIES` | `false` | Force `Secure` cookies. Not needed with a panel domain or a trusted proxy that sends `X-Forwarded-Proto`. |
 | `TUNPLOY_UPDATE_CHECK` | `true` | Check GitHub for new releases twice a day. `false` checks only when you press **Check now**. |
 | `TUNPLOY_GEOIP` | `true` | Show device countries. Downloads the free [DB-IP Lite](https://db-ip.com) database (about 8 MB) into the data dir and refreshes it monthly. Set to `false` to never contact db-ip.com. |

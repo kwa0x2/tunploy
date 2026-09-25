@@ -97,7 +97,7 @@ func run() error {
 	}
 	defer dk.Close()
 
-	mgr, err := deploy.New(st, dk, cfg.DataDir)
+	mgr, err := deploy.New(st, dk, cfg.DataDir, cfg.ContainerPrefix)
 	if err != nil {
 		return err
 	}

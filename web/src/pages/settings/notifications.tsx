@@ -13,7 +13,7 @@ export function NotificationsSettingsPage() {
   return (
     <>
       <PageHeader title="Notifications" description="Emails the panel sends you when something happens." />
-      <div className="grid max-w-2xl gap-6">
+      <div className="max-w-6xl">
         {notifications.data ? (
           <NotificationsCard settings={notifications.data} onSaved={() => void notifications.reload()} />
         ) : notifications.error !== undefined ? (
@@ -21,7 +21,10 @@ export function NotificationsSettingsPage() {
             <AlertDescription>{errorMessage(notifications.error)}</AlertDescription>
           </Alert>
         ) : (
-          <Skeleton className="h-96 rounded-xl" />
+          <div className="grid gap-6 xl:grid-cols-2">
+            <Skeleton className="h-96 rounded-xl" />
+            <Skeleton className="h-96 rounded-xl" />
+          </div>
         )}
       </div>
     </>

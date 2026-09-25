@@ -30,7 +30,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { st.Close() })
 
 	fk := dockertest.New()
-	m, err := New(st, fk, t.TempDir())
+	m, err := New(st, fk, t.TempDir(), DefaultContainerPrefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func (f *fixture) instance(t *testing.T, name string, port int) *wg.Instance {
 
 func (f *fixture) state(t *testing.T, id int64) string {
 	t.Helper()
-	ct, ok := f.docker.Container(ContainerName(id))
+	ct, ok := f.docker.Container(f.m.ContainerName(id))
 	if !ok {
 		return "missing"
 	}
@@ -69,7 +69,7 @@ func TestDeployCreatesContainer(t *testing.T) {
 		t.Fatalf("state = %s, want running", got)
 	}
 
-	spec, _ := f.docker.Spec(ContainerName(in.ID))
+	spec, _ := f.docker.Spec(f.m.ContainerName(in.ID))
 	if spec.Image != f.m.Image() || !strings.HasPrefix(spec.Image, "tunploy/wireguard:") {
 		t.Errorf("image = %q", spec.Image)
 	}
@@ -200,19 +200,20 @@ func TestReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Pretend the outdated container predates the current image.
-	f.docker.RemoveContainer(ctx, ContainerName(outdated.ID))
+	f.docker.RemoveContainer(ctx, f.m.ContainerName(outdated.ID))
 	f.docker.Add(docker.Container{
-		ID: "old", Name: ContainerName(outdated.ID), Image: "tunploy/wireguard:old", State: "exited",
+		ID: "old", Name: f.m.ContainerName(outdated.ID), Image: "tunploy/wireguard:old", State: "exited",
 		Labels: map[string]string{docker.LabelManaged: "true", LabelInstance: "2"},
 	})
 	f.docker.Add(docker.Container{
-		ID: "orphan", Name: ContainerName(99), Image: f.m.Image(), State: "running",
+		ID: "orphan", Name: f.m.ContainerName(99), Image: f.m.Image(), State: "running",
 		Labels: map[string]string{docker.LabelManaged: "true", LabelInstance: "99"},
 	})
 	f.docker.Add(docker.Container{
 		ID: "other", Name: "tunploy-something-else", State: "running",
 		Labels: map[string]string{docker.LabelManaged: "true"},
 	})
+	addOtherPanel(f)
 
 	if err := f.m.Reconcile(ctx); err != nil {
 		t.Fatal(err)
@@ -221,18 +222,38 @@ func TestReconcile(t *testing.T) {
 	if got := f.state(t, missing.ID); got != "running" {
 		t.Errorf("missing instance: state = %s, want running", got)
 	}
-	ct, _ := f.docker.Container(ContainerName(outdated.ID))
+	ct, _ := f.docker.Container(f.m.ContainerName(outdated.ID))
 	if ct.Image != f.m.Image() || ct.State != "created" {
 		t.Errorf("outdated instance: %+v, want the new image and still stopped", ct)
 	}
 	if got := f.state(t, healthy.ID); got != "running" {
 		t.Errorf("healthy instance: state = %s", got)
 	}
-	if _, ok := f.docker.Container(ContainerName(99)); ok {
+	if _, ok := f.docker.Container(f.m.ContainerName(99)); ok {
 		t.Error("orphaned container was not removed")
 	}
 	if _, ok := f.docker.Container("tunploy-something-else"); !ok {
 		t.Error("a managed container without an instance label must be left alone")
+	}
+	wantOtherPanel(t, f)
+}
+
+// Another panel on the same daemon, whose instance IDs overlap with ours.
+func addOtherPanel(f *fixture) {
+	for _, id := range []string{"1", "99"} {
+		f.docker.Add(docker.Container{
+			ID: "dev-" + id, Name: "tunploy-dev-" + id, State: "running",
+			Labels: map[string]string{docker.LabelManaged: "true", LabelInstance: id},
+		})
+	}
+}
+
+func wantOtherPanel(t *testing.T, f *fixture) {
+	t.Helper()
+	for _, name := range []string{"tunploy-dev-1", "tunploy-dev-99"} {
+		if ct, ok := f.docker.Container(name); !ok || ct.State != "running" {
+			t.Errorf("%s belongs to another panel and must be left alone, got %+v", name, ct)
+		}
 	}
 }
 
@@ -251,7 +272,7 @@ func TestStatusReportsCrashLoop(t *testing.T) {
 	f := newFixture(t)
 	in := f.instance(t, "Home", 51820)
 	f.docker.Add(docker.Container{
-		ID: "x", Name: ContainerName(in.ID), State: "restarting",
+		ID: "x", Name: f.m.ContainerName(in.ID), State: "restarting",
 		Labels: map[string]string{docker.LabelManaged: "true", LabelInstance: "1"},
 	})
 
@@ -305,7 +326,8 @@ func TestRebuildReplacesEveryContainer(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before, _ := f.docker.Container(ContainerName(home.ID))
+	before, _ := f.docker.Container(f.m.ContainerName(home.ID))
+	addOtherPanel(f)
 
 	// As after a restore: Lab is gone from the database, Home is still there.
 	if err := f.store.DeleteInstance(ctx, lab.ID); err != nil {
@@ -315,7 +337,7 @@ func TestRebuildReplacesEveryContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	after, ok := f.docker.Container(ContainerName(home.ID))
+	after, ok := f.docker.Container(f.m.ContainerName(home.ID))
 	if !ok || after.ID == before.ID || after.State != "running" {
 		t.Fatalf("home after rebuild = %+v (before %s)", after, before.ID)
 	}
@@ -328,4 +350,5 @@ func TestRebuildReplacesEveryContainer(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(f.m.ConfigDir(home.ID), "wg0.conf")); err != nil {
 		t.Fatalf("home's config: %v", err)
 	}
+	wantOtherPanel(t, f)
 }

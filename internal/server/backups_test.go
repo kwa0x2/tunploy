@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-
-	"github.com/kwa0x2/tunploy/internal/deploy"
 )
 
 func TestExportAndImportBackup(t *testing.T) {
@@ -49,7 +47,7 @@ func TestExportAndImportBackup(t *testing.T) {
 	if len(list) != 1 || list[0].Name != "Home" || list[0].PeerCount != 1 || list[0].Status.State != "running" {
 		t.Fatalf("instances after restore = %+v", list)
 	}
-	if _, ok := p.fake.Container(deploy.ContainerName(office.ID)); ok {
+	if _, ok := p.fake.Container(p.s.deploy.ContainerName(office.ID)); ok {
 		t.Fatal("the Office container outlived the restore")
 	}
 
