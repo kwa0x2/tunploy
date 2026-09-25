@@ -10,7 +10,12 @@ import { OverviewPage } from "@/pages/overview"
 import { PeersPage } from "@/pages/peers"
 import { ServerDetailPage } from "@/pages/server-detail"
 import { ServersPage } from "@/pages/servers"
-import { SettingsPage } from "@/pages/settings"
+import { BackupsSettingsPage } from "@/pages/settings/backups"
+import { DomainSettingsPage } from "@/pages/settings/domain"
+import { GeneralSettingsPage } from "@/pages/settings/general"
+import { NotificationsSettingsPage } from "@/pages/settings/notifications"
+import { SecuritySettingsPage } from "@/pages/settings/security"
+import { UpdatesSettingsPage } from "@/pages/settings/updates"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { ThemeProvider } from "@/lib/theme"
 
@@ -50,7 +55,12 @@ function Routing() {
         <Route path="/servers/:id" element={<ServerDetailPage />} />
         <Route path="/peers" element={<PeersPage />} />
         <Route path="/activity" element={<ActivityPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings" element={<GeneralSettingsPage />} />
+        <Route path="/settings/domain" element={<DomainSettingsPage />} />
+        <Route path="/settings/security" element={<SecuritySettingsPage />} />
+        <Route path="/settings/notifications" element={<NotificationsSettingsPage />} />
+        <Route path="/settings/backups" element={<BackupsSettingsPage />} />
+        <Route path="/settings/updates" element={<UpdatesSettingsPage />} />
       </Route>
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="*" element={<NotFoundPage />} />

@@ -216,7 +216,7 @@ func bucket(ctx context.Context, st *store.Store) (*backup.S3, error) {
 	}
 	cfg := backup.LoadConfig(stored)
 	if cfg == nil {
-		return nil, errors.New("no S3 bucket is connected; connect one under Settings → Backup storage, or restore from a file")
+		return nil, errors.New("no S3 bucket is connected; connect one under Settings → Backups, or restore from a file")
 	}
 	return backup.NewS3(cfg.S3), nil
 }

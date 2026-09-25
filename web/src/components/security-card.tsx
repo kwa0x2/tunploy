@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import type { FormEvent, ReactNode } from "react"
 import { Loader2, Lock, LockOpen, ShieldCheck, ShieldOff } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
+import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -34,7 +35,7 @@ export function SecurityCard({ httpsUrl }: { httpsUrl: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Security</CardTitle>
+        <CardTitle>Connection and sign-in</CardTitle>
         <CardDescription>How this panel is reached and how you sign in to it.</CardDescription>
       </CardHeader>
       <CardContent className="divide-y">
@@ -54,7 +55,13 @@ export function SecurityCard({ httpsUrl }: { httpsUrl: string }) {
               . Use that address instead of this one.
             </>
           ) : (
-            "Your password travels in plain text. Add a domain above to get a free certificate."
+            <>
+              Your password travels in plain text.{" "}
+              <Link className="text-foreground font-medium underline" to="/settings/domain">
+                Add a domain
+              </Link>{" "}
+              to get a free certificate.
+            </>
           )}
         </Row>
         <Row

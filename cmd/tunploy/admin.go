@@ -162,7 +162,7 @@ func adminDisableTOTP(args []string, p *prompter) error {
 	if err := disableTOTP(context.Background(), st, *email); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr, "Two-factor authentication is off. Sign in with just the password and set it up again under Settings.")
+	fmt.Fprintln(os.Stderr, "Two-factor authentication is off. Sign in with just the password and set it up again under Settings → Security.")
 	return nil
 }
 

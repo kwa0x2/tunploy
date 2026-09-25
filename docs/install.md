@@ -126,7 +126,7 @@ Under **Settings → Security**, turn on two-factor authentication and scan the 
 
 ## Email notifications
 
-Under **Settings → Email notifications**, give the panel an SMTP account and it emails you when servers go down or come back, devices are added, a device uses up its data, someone fails to sign in, and so on; you choose which. Events that happen close together arrive as one email, and at most 30 emails go out an hour.
+Under **Settings → Notifications**, give the panel an SMTP account and it emails you when servers go down or come back, devices are added, a device uses up its data, someone fails to sign in, and so on; you choose which. Events that happen close together arrive as one email, and at most 30 emails go out an hour.
 
 Any provider that offers SMTP works. Use the address you send from as the username, port **587** with **STARTTLS** (or **465** with **TLS**), and set **From** to an address the account may send as. Gmail and Outlook need an app password rather than your normal one. **Send test email** tries the form as it is, before you save, and shows the mail server's own answer if it fails.
 
@@ -136,7 +136,7 @@ A backup is one `.tar.gz` file with every server and device (including their key
 
 Under **Settings → Backups**, **Download backup** saves one to your computer, and **Restore from file** loads one back. A restore replaces everything on the panel, restarts the VPN servers (devices drop for a moment) and signs everyone out; sign in with the account from the backup. A backup from an older Tunploy is upgraded as it is restored; one from a newer Tunploy is refused, so update the panel first.
 
-To keep copies off the server, connect an S3 bucket under **Settings → Backup storage**. Any S3-compatible storage works:
+To keep copies off the server, connect an S3 bucket under **Settings → Backups**. Any S3-compatible storage works:
 
 | Provider | Endpoint | Region | Path-style |
 | --- | --- | --- | --- |
@@ -205,7 +205,7 @@ The panel listens on **TCP 3000**, plus **TCP 80 and 443** for its HTTPS domain,
 2. Open the server and choose **Add peer**. Scan the QR code with the WireGuard app on your phone, or download the `.conf` file for a laptop.
 3. Connect. The peer shows up as **Online** within a few seconds.
 
-The endpoint that clients connect to comes from **Settings → Public host**. If the install script detected the wrong address, change it there before creating servers. Existing servers keep their own endpoint, which you can change under each server's settings.
+The endpoint that clients connect to comes from **Settings → General**. If the install script detected the wrong address, change it there before creating servers. Existing servers keep their own endpoint, which you can change under each server's settings.
 
 ## Manual install with Docker Compose
 
@@ -241,7 +241,7 @@ docker exec -it tunploy tunploy admin create
 | --- | --- | --- |
 | `TUNPLOY_LISTEN` | `:3000` | Address inside the container. |
 | `TUNPLOY_DATA_DIR` | `/var/lib/tunploy` | Database and WireGuard configs. Mount it at the same path on the host. |
-| `TUNPLOY_PUBLIC_HOST` | empty | Default endpoint for new servers, used while **Settings → Public host** is empty. |
+| `TUNPLOY_PUBLIC_HOST` | empty | Default endpoint for new servers, used while **Settings → General** is empty. |
 | `TUNPLOY_SESSION_TTL` | `168h` | How long a sign-in lasts. |
 | `TUNPLOY_HTTPS` | `true` | `false` stops the panel from listening on 80 and 443; Settings then can't set a domain. |
 | `TUNPLOY_HTTPS_LISTEN`, `TUNPLOY_HTTP_LISTEN` | `:443`, `:80` | Where HTTPS and its redirect listen inside the container. |

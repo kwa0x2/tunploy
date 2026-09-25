@@ -203,7 +203,7 @@ func (m *Manager) HTTPHandler() http.Handler {
 		acm, domain := m.acm, m.status.Domain
 		m.mu.Unlock()
 		if acm == nil {
-			http.Error(w, "Tunploy: no panel domain is set. Add one under Settings.", http.StatusNotFound)
+			http.Error(w, "Tunploy: no panel domain is set. Add one under Settings → Domain.", http.StatusNotFound)
 			return
 		}
 		origin := "https://" + domain

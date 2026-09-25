@@ -210,7 +210,7 @@ func compose(batch []store.Event, to []string, panelURL string) Message {
 	if panelURL != "" {
 		b.WriteString("\nActivity log: " + strings.TrimSuffix(panelURL, "/") + "/activity\n")
 	}
-	b.WriteString("\n--\nSent by Tunploy. Choose which events send email under Settings → Email notifications.\n")
+	b.WriteString("\n--\nSent by Tunploy. Choose which events send email under Settings → Notifications.\n")
 	return Message{To: to, Subject: subject, Body: b.String()}
 }
 

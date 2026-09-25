@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Logo } from "@/components/logo"
+import { SiteFooter } from "@/components/site-footer"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { cn } from "@/lib/utils"
 
@@ -21,6 +22,7 @@ export function AuthLayout({ children, className }: { children: ReactNode; class
         </div>
         {children}
       </div>
+      <SiteFooter className="absolute inset-x-0 bottom-4 px-6" />
     </div>
   )
 }

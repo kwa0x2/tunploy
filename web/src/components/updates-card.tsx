@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react"
-import { useLocation } from "react-router-dom"
+import { useState } from "react"
 import { ArrowUpCircle, CircleCheck, ExternalLink, Info, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -21,12 +20,6 @@ export function UpdatesCard() {
   const { status, error, check, startUpdate } = useUpdate()
   const [checking, setChecking] = useState(false)
   const now = useNow()
-  const ref = useRef<HTMLDivElement>(null)
-  const { hash } = useLocation()
-
-  useEffect(() => {
-    if (hash === "#updates" && status) ref.current?.scrollIntoView({ behavior: "smooth" })
-  }, [hash, status])
 
   async function checkNow() {
     setChecking(true)
@@ -42,12 +35,18 @@ export function UpdatesCard() {
   }
 
   if (!status) {
-    return error === undefined ? <Skeleton className="h-56 rounded-xl" /> : null
+    return error === undefined ? (
+      <Skeleton className="h-56 rounded-xl" />
+    ) : (
+      <Alert variant="destructive">
+        <AlertDescription>{errorMessage(error)}</AlertDescription>
+      </Alert>
+    )
   }
   const latest = status.latest
 
   return (
-    <Card ref={ref} id="updates" className="scroll-mt-20">
+    <Card>
       <CardHeader>
         <CardTitle>Updates</CardTitle>
         <CardDescription>
