@@ -91,3 +91,9 @@ export function endpointOf(instance: Instance): string {
 export function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Please try again."
 }
+
+// Under Compose or Dokploy the container is not called "tunploy"; when the
+// panel can't tell, the admin fills the name in.
+export function execCommand(container: string | undefined, args: string): string {
+  return `docker exec -it ${container || "CONTAINER_ID"} tunploy ${args}`
+}

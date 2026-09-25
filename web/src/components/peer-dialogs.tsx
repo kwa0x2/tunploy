@@ -126,33 +126,42 @@ function PeerNameForm({ instanceId, peer, busy, setBusy, onDone, onCancel }: {
   )
 }
 
+type Unit = "MB" | "GB"
+
+const unitBytes: Record<Unit, number> = { MB: 1024 ** 2, GB: gib }
+
 interface Limits {
-  gb: string
+  size: string
+  unit: Unit
   until: string
 }
 
-const badLimit = "Enter a size in GB, or leave it empty for no limit."
+const badLimit = "Enter a size, or leave it empty for no limit."
 
 const pad = (n: number) => String(n).padStart(2, "0")
 const dateInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 
 // Access runs to the end of the chosen day, so the stored instant is the next midnight.
+// Limits under 1 GB read better in MB.
 function limitsOf(peer?: Peer): Limits {
+  const limit = peer?.data_limit ?? 0
+  const unit: Unit = limit && limit < gib ? "MB" : "GB"
   return {
-    gb: peer?.data_limit ? String(Number((peer.data_limit / gib).toFixed(2))) : "",
+    size: limit ? String(Number((limit / unitBytes[unit]).toFixed(2))) : "",
+    unit,
     until: peer?.expires_at ? dateInput(new Date(new Date(peer.expires_at).getTime() - 1)) : "",
   }
 }
 
-function limitsInput({ gb, until }: Limits): Pick<PeerInput, "data_limit" | "expires_at"> | null {
-  const size = gb.trim() === "" ? 0 : Number(gb)
+function limitsInput({ size: raw, unit, until }: Limits): Pick<PeerInput, "data_limit" | "expires_at"> | null {
+  const size = raw.trim() === "" ? 0 : Number(raw)
   if (!Number.isFinite(size) || size < 0) return null
   let expires: string | null = null
   if (until) {
     const [y, m, d] = until.split("-").map(Number)
     expires = new Date(y, m - 1, d + 1).toISOString()
   }
-  return { data_limit: Math.round(size * gib), expires_at: expires }
+  return { data_limit: Math.round(size * unitBytes[unit]), expires_at: expires }
 }
 
 function presetDate(days: number, months = 0) {
@@ -179,7 +188,7 @@ function LimitFields({ value, onChange, error }: {
         error={error}
         hint="Download and upload together. Resets on the 1st. Leave empty for no limit."
       >
-        <div className="relative">
+        <div className="flex gap-1.5">
           <Input
             id="peer-limit"
             type="number"
@@ -187,14 +196,24 @@ function LimitFields({ value, onChange, error }: {
             step="any"
             inputMode="decimal"
             placeholder="No limit"
-            className="pr-10"
-            value={value.gb}
-            onChange={(e) => onChange({ ...value, gb: e.target.value })}
+            value={value.size}
+            onChange={(e) => onChange({ ...value, size: e.target.value })}
             aria-invalid={Boolean(error)}
           />
-          <span className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm">
-            GB
-          </span>
+          <div role="radiogroup" aria-label="Unit" className="flex shrink-0 gap-1">
+            {(["MB", "GB"] as const).map((unit) => (
+              <Button
+                key={unit}
+                type="button"
+                role="radio"
+                aria-checked={value.unit === unit}
+                variant={value.unit === unit ? "default" : "outline"}
+                onClick={() => onChange({ ...value, unit })}
+              >
+                {unit}
+              </Button>
+            ))}
+          </div>
         </div>
       </FormField>
       <FormField

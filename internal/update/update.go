@@ -307,6 +307,15 @@ func (s *Service) findSelf(ctx context.Context) (docker.Self, error) {
 	return self, err
 }
 
+// ContainerName is the panel's own container, or empty outside Docker.
+func (s *Service) ContainerName(ctx context.Context) string {
+	self, err := s.findSelf(ctx)
+	if err != nil {
+		return ""
+	}
+	return self.Name
+}
+
 func unsupported(current string, self docker.Self, selfErr error) string {
 	switch {
 	case !IsRelease(current):

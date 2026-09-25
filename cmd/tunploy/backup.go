@@ -32,7 +32,7 @@ panel is stopped or broken; restart the panel afterwards to apply it:
   tunploy restart
 
 Without the install script, prefix it with "docker exec -it tunploy" and restart
-with "docker restart tunploy".
+with "docker restart tunploy", using the container's name as "docker ps" shows it.
 
 An encrypted backup is opened with the panel's saved passphrase, or you are
 asked for it (as one line on stdin when it is piped in).

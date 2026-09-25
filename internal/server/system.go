@@ -18,6 +18,8 @@ type dockerStatusResponse struct {
 	Available bool         `json:"available"`
 	Error     string       `json:"error,omitempty"`
 	Info      *docker.Info `json:"info,omitempty"`
+	// The panel's own container, for docker exec commands.
+	Container string `json:"container,omitempty"`
 }
 
 // Always 200: a down daemon is state to show, and its raw error says how to fix it.
@@ -29,5 +31,9 @@ func (s *Server) handleDockerStatus(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return httpx.JSON(w, http.StatusOK, dockerStatusResponse{Error: err.Error()})
 	}
-	return httpx.JSON(w, http.StatusOK, dockerStatusResponse{Available: true, Info: &info})
+	return httpx.JSON(w, http.StatusOK, dockerStatusResponse{
+		Available: true,
+		Info:      &info,
+		Container: s.updates.ContainerName(ctx),
+	})
 }

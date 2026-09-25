@@ -33,12 +33,23 @@ func newUserResponse(u *store.User) userResponse {
 	return userResponse{ID: u.ID, Name: u.Name, Email: u.Email, TOTPEnabled: u.TOTPSecret != "", CreatedAt: u.CreatedAt}
 }
 
+// Container names the panel's own, which differs under Compose or Dokploy,
+// for the docker exec command the UI shows; only until an admin exists.
+type setupStatus struct {
+	SetupRequired bool   `json:"setup_required"`
+	Container     string `json:"container,omitempty"`
+}
+
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) error {
 	n, err := s.store.CountUsers(r.Context())
 	if err != nil {
 		return err
 	}
-	return httpx.JSON(w, http.StatusOK, map[string]bool{"setup_required": n == 0})
+	st := setupStatus{SetupRequired: n == 0}
+	if st.SetupRequired {
+		st.Container = s.updates.ContainerName(r.Context())
+	}
+	return httpx.JSON(w, http.StatusOK, st)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {

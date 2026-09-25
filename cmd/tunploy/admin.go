@@ -31,7 +31,9 @@ stdin when it is piped in. On a server set up by the install script:
 
   tunploy admin create
 
-Otherwise run it inside the container: docker exec -it tunploy tunploy admin create
+Otherwise run it inside the container, named as "docker ps" shows it:
+
+  docker exec -it tunploy tunploy admin create
 `
 
 var errAdminExists = errors.New("an admin account already exists; use 'tunploy admin reset-password' to change its password")

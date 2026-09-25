@@ -39,6 +39,8 @@ export interface User {
 
 export interface SetupStatus {
   setup_required: boolean
+  // The panel's own container; sent only while there is no admin.
+  container?: string
 }
 
 export interface Credentials {
@@ -169,6 +171,7 @@ export interface UpdateStatus {
 export interface DockerStatus {
   available: boolean
   error?: string
+  container?: string
 }
 
 // null clears the expiry.

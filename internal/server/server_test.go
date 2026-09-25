@@ -94,17 +94,19 @@ func TestSetupStatusAndLoginFlow(t *testing.T) {
 	s := newTestServer(t)
 
 	var status struct {
-		SetupRequired bool `json:"setup_required"`
+		SetupRequired bool   `json:"setup_required"`
+		Container     string `json:"container"`
 	}
 	decode(t, do(t, s, "GET", "/api/setup", nil), &status)
-	if !status.SetupRequired {
-		t.Fatal("a panel without an admin must report setup_required")
+	if !status.SetupRequired || status.Container != "tunploy" {
+		t.Fatalf("without an admin: %+v, want setup_required and the container for docker exec", status)
 	}
 
 	createAdmin(t, s)
+	status.Container = ""
 	decode(t, do(t, s, "GET", "/api/setup", nil), &status)
-	if status.SetupRequired {
-		t.Fatal("setup_required must be false once an admin exists")
+	if status.SetupRequired || status.Container != "" {
+		t.Fatalf("with an admin: %+v, want neither", status)
 	}
 
 	rec := do(t, s, "POST", "/api/auth/login", map[string]string{

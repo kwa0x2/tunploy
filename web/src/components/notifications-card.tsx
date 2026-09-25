@@ -8,7 +8,6 @@ import {
   CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -27,7 +26,7 @@ const securities: { value: SMTPSecurity; label: string; port: number }[] = [
 ]
 
 const groups: { id: NotificationGroup; label: string; hint: string }[] = [
-  { id: "servers", label: "Servers", hint: "Created, deleted, failed to deploy, went down or came back." },
+  { id: "servers", label: "Servers", hint: "Created, deleted, failed to deploy, went down or came back; nodes added, removed or offline." },
   { id: "devices", label: "Devices", hint: "Added, removed, enabled or disabled." },
   { id: "limits", label: "Data limits and access", hint: "A device used up its data, its access ended, or it may connect again." },
   { id: "failed_logins", label: "Failed sign-ins", hint: "Someone tried a wrong password or code." },
@@ -53,6 +52,9 @@ function formOf(s: NotificationSettings): Form {
   }
 }
 
+// Toggling a switch off and on again changes the order, not the settings.
+const fingerprint = (f: Form) => JSON.stringify({ ...inputOf(f), events: [...f.events].sort() })
+
 function inputOf(f: Form): NotificationInput {
   return {
     ...f,
@@ -70,6 +72,8 @@ export function NotificationsCard({ settings, onSaved }: {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<"save" | "test">()
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }))
+  const [saved, setSaved] = useState(() => formOf(settings))
+  const dirty = fingerprint(form) !== fingerprint(saved)
 
   async function run(action: "save" | "test") {
     setErrors({})
@@ -79,7 +83,9 @@ export function NotificationsCard({ settings, onSaved }: {
         await api.testNotifications(inputOf(form))
         toast.success(`Test email sent to ${form.to}. Check the inbox, and the spam folder.`)
       } else {
-        setForm(formOf(await api.setNotifications(inputOf(form))))
+        const next = formOf(await api.setNotifications(inputOf(form)))
+        setForm(next)
+        setSaved(next)
         toast.success("Notification settings saved.")
       }
     } catch (err) {
@@ -254,17 +260,28 @@ export function NotificationsCard({ settings, onSaved }: {
 
           <DeliveryStatus status={settings.status} />
         </CardContent>
-        <CardFooter className="flex-wrap justify-end gap-2">
+      </Card>
+
+      <div className="bg-background/80 supports-backdrop-filter:bg-background/60 sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 shadow-sm backdrop-blur xl:col-span-2">
+        <p className="text-muted-foreground text-sm">
+          {dirty ? (
+            <span className="font-medium text-amber-700 dark:text-amber-400">Unsaved changes</span>
+          ) : (
+            "Saved."
+          )}{" "}
+          Save stores both the events and the mail server.
+        </p>
+        <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" disabled={busy !== undefined} onClick={() => void run("test")}>
             {busy === "test" ? <Loader2 className="animate-spin" /> : <Send />}
             Send test email
           </Button>
-          <Button type="submit" disabled={busy !== undefined}>
+          <Button type="submit" disabled={busy !== undefined || !dirty}>
             {busy === "save" && <Loader2 className="animate-spin" />}
-            Save
+            Save changes
           </Button>
-        </CardFooter>
-      </Card>
+        </div>
+      </div>
     </form>
   )
 }

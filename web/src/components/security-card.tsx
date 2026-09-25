@@ -23,7 +23,7 @@ import { CodeInput } from "@/components/login-form"
 import { ApiError, api } from "@/lib/api"
 import type { TOTPSetup, User } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
-import { errorMessage } from "@/lib/format"
+import { errorMessage, execCommand } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 export function SecurityCard({ httpsUrl }: { httpsUrl: string }) {
@@ -237,6 +237,11 @@ function EnableForm({ busy, setBusy, onDone, onCancel }: FormProps) {
 
 function DisableDialog({ open, onOpenChange, onDone }: DialogProps) {
   const [busy, setBusy] = useState(false)
+  const [container, setContainer] = useState<string>()
+
+  useEffect(() => {
+    if (open) api.dockerStatus().then((d) => setContainer(d.container ?? "")).catch(() => setContainer(""))
+  }, [open])
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent>
@@ -245,7 +250,7 @@ function DisableDialog({ open, onOpenChange, onDone }: DialogProps) {
           <DialogDescription>
             Signing in will only need your password again. Lost your phone? Run{" "}
             <code className="bg-muted rounded px-1 font-mono text-xs">
-              docker exec -it tunploy tunploy admin disable-2fa
+              {execCommand(container, "admin disable-2fa")}
             </code>{" "}
             on the server.
           </DialogDescription>

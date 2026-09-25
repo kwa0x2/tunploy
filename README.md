@@ -321,7 +321,7 @@ tunploy admin reset-password --email you@example.com
 tunploy admin disable-2fa --email you@example.com
 ```
 
-With Docker Compose there is no `tunploy` command on the server; run the same commands in the container instead, as in `docker exec -it tunploy tunploy admin create`.
+With Docker Compose there is no `tunploy` command on the server; run the same commands in the container instead, as in `docker exec -it tunploy tunploy admin create`. Replace `tunploy` after `-it` with the container's name if it differs, as under Dokploy: `docker ps --filter name=tunploy` shows it, and so does the panel wherever it prints such a command.
 
 Once signed in, you can also change the password under **Settings → Security**.
 
