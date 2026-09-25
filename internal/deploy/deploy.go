@@ -517,6 +517,9 @@ func (m *Manager) peerStats(ctx context.Context, h Host, in *wg.Instance) (map[w
 }
 
 // OnPeerChange must be set before Watch starts or requests arrive.
+// Online is what the watcher last saw, without asking WireGuard.
+func (m *Manager) Online(instanceID int64) map[wg.Key]bool { return m.activity.online(instanceID) }
+
 func (m *Manager) OnPeerChange(fn func(PeerChange)) { m.onPeerChange = fn }
 
 // OnPeerBlock must be set before Watch starts.

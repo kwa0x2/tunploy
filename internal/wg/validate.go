@@ -1,6 +1,8 @@
 package wg
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/netip"
 	"strings"
 	"unicode"
@@ -13,6 +15,9 @@ const (
 	maxSubnetBits = 30
 	minMTU        = 1280
 	maxMTU        = 1500
+
+	maxExternalIDLength = 255
+	maxMetadataBytes    = 4096
 )
 
 func (in Instance) Validate() map[string]string {
@@ -78,6 +83,20 @@ func (p Peer) Validate() map[string]string {
 	}
 	if p.DataLimit < 0 {
 		fields["data_limit"] = "data limit must be 0 (no limit) or more"
+	}
+	switch {
+	case len(p.ExternalID) > maxExternalIDLength:
+		fields["external_id"] = "external_id must be at most 255 bytes"
+	case strings.IndexFunc(p.ExternalID, unicode.IsControl) >= 0:
+		fields["external_id"] = "external_id must not contain control characters"
+	}
+	if len(p.Metadata) > 0 {
+		switch {
+		case len(p.Metadata) > maxMetadataBytes:
+			fields["metadata"] = "metadata must be at most 4 KB"
+		case !json.Valid(p.Metadata) || !bytes.HasPrefix(bytes.TrimSpace(p.Metadata), []byte("{")):
+			fields["metadata"] = "metadata must be a JSON object"
+		}
 	}
 	return fields
 }

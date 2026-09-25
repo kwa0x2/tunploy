@@ -36,6 +36,7 @@ type Server struct {
 	backups       *backup.Service
 	updates       *update.Service
 	loginThrottle *auth.Throttle
+	limiter       *rateLimiter
 	handler       http.Handler
 	lookupHost    func(ctx context.Context, host string) ([]string, error)
 
@@ -57,6 +58,7 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, nod
 		backups:       bk,
 		updates:       up,
 		loginThrottle: auth.NewThrottle(loginMaxAttempts, loginWindow),
+		limiter:       newRateLimiter(),
 		lookupHost:    net.DefaultResolver.LookupHost,
 	}
 	mgr.OnPeerChange(s.peerChanged)
@@ -111,6 +113,9 @@ func (s *Server) routes() http.Handler {
 	private.Handle("POST /api/settings/backups/test", httpx.Handler(s.handleTestBackupSettings))
 	private.Handle("PUT /api/settings/backups/encryption", httpx.Handler(s.handleSetBackupEncryption))
 	private.Handle("GET /api/events", httpx.Handler(s.handleListEvents))
+	private.Handle("GET /api/api-keys", httpx.Handler(s.handleListAPIKeys))
+	private.Handle("POST /api/api-keys", httpx.Handler(s.handleCreateAPIKey))
+	private.Handle("DELETE /api/api-keys/{id}", httpx.Handler(s.handleDeleteAPIKey))
 
 	private.Handle("GET /api/backups", httpx.Handler(s.handleListBackups))
 	private.Handle("POST /api/backups", httpx.Handler(s.handleCreateBackup))
@@ -151,6 +156,7 @@ func (s *Server) routes() http.Handler {
 	}))
 
 	mux.Handle("/api/", chain(private, s.requireAuth))
+	mux.Handle("/api/v1/", s.apiRoutes())
 	mux.Handle("/", web.Handler())
 
 	return mux

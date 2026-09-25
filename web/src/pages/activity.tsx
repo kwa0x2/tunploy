@@ -16,6 +16,7 @@ import {
   ServerCrash,
   ServerOff,
   KeyRound,
+  KeySquare,
   Pencil,
   Plug,
   PlugZap,
@@ -133,6 +134,8 @@ const tones: Record<Tone, string> = {
 function EventRow({ event, now }: { event: ActivityEvent; now: number }) {
   const { icon: Icon, tone, text } = describe(event)
   const at = new Date(event.created_at)
+  const via = event.actor?.startsWith("api:") ? `via API key ${event.actor.slice(4)}` : ""
+  const sub = [event.detail, via].filter(Boolean).join(" · ")
 
   return (
     <li className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:gap-4">
@@ -142,9 +145,9 @@ function EventRow({ event, now }: { event: ActivityEvent; now: number }) {
         </span>
         <div className="min-w-0">
           <p className="truncate text-sm">{text}</p>
-          {event.detail && (
-            <p className="text-muted-foreground truncate text-xs" title={event.detail}>
-              {event.detail}
+          {sub && (
+            <p className="text-muted-foreground truncate text-xs" title={sub}>
+              {sub}
             </p>
           )}
         </div>
@@ -255,6 +258,10 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: ShieldCheck, tone: "good", text: "Two-factor authentication turned on" }
     case "auth.totp_disabled":
       return { icon: ShieldOff, tone: "bad", text: "Two-factor authentication turned off" }
+    case "apikey.created":
+      return { icon: KeySquare, tone: "neutral", text: "API key created" }
+    case "apikey.revoked":
+      return { icon: KeySquare, tone: "neutral", text: "API key revoked" }
     default:
       return { icon: Settings, tone: "neutral", text: e.kind }
   }

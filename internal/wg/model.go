@@ -1,6 +1,7 @@
 package wg
 
 import (
+	"encoding/json"
 	"net/netip"
 	"slices"
 	"time"
@@ -37,7 +38,8 @@ type Instance struct {
 	UpdatedAt           time.Time      `json:"updated_at"`
 }
 
-// The private key is kept so the config and QR code can be shown again.
+// The private key is kept so the config and QR code can be shown again,
+// unless the client made its own key pair: then PrivateKey is zero.
 type Peer struct {
 	ID           int64      `json:"id"`
 	InstanceID   int64      `json:"instance_id"`
@@ -47,6 +49,10 @@ type Peer struct {
 	PublicKey    Key        `json:"public_key"`
 	PresharedKey Key        `json:"-"`
 	Enabled      bool       `json:"enabled"`
+	// Set by API clients to find their own users' devices; not unique.
+	ExternalID string `json:"external_id,omitempty"`
+	// A JSON object, stored as given.
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 	// Bytes per calendar month, both directions; 0 means no limit.
 	DataLimit     int64      `json:"data_limit"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
@@ -81,5 +87,18 @@ func NewPeer(instanceID int64, name string) Peer {
 		Enabled:      true,
 	}
 }
+
+// NewClientPeer is a peer whose private key never reaches the panel.
+func NewClientPeer(instanceID int64, name string, public Key) Peer {
+	return Peer{
+		InstanceID:   instanceID,
+		Name:         name,
+		PublicKey:    public,
+		PresharedKey: GeneratePresharedKey(),
+		Enabled:      true,
+	}
+}
+
+func (p Peer) KeyOnClient() bool { return p.PrivateKey.IsZero() }
 
 func (in Instance) Subnet() netip.Prefix { return in.Address.Masked() }

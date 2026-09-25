@@ -270,5 +270,8 @@ func housekeeping(ctx context.Context, st *store.Store) {
 		} else if n > 0 {
 			slog.Info("purged old events", "count", n)
 		}
+		if _, err := st.DeleteIdempotencyKeysBefore(ctx, time.Now().Add(-store.IdempotencyTTL)); err != nil {
+			slog.Error("purge idempotency keys", "error", err)
+		}
 	}
 }

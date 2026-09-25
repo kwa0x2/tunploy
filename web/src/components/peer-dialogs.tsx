@@ -356,8 +356,9 @@ export function PeerConfigDialog({ peer, open, onOpenChange }: ConfigProps) {
         <DialogHeader>
           <DialogTitle>{peer?.name}</DialogTitle>
           <DialogDescription>
-            Scan with the WireGuard app, or download the file for a desktop client. Anyone with
-            this config can join the VPN as this peer.
+            {peer?.key_on_client
+              ? "The server side of this device's config."
+              : "Scan with the WireGuard app, or download the file for a desktop client. Anyone with this config can join the VPN as this peer."}
           </DialogDescription>
         </DialogHeader>
         {peer && <PeerConfig key={peer.id} peer={peer} />}
@@ -395,8 +396,20 @@ function PeerConfig({ peer }: { peer: Peer }) {
           </AlertDescription>
         </Alert>
       )}
+      {peer.key_on_client && (
+        <Alert>
+          <AlertDescription>
+            This device made its own key pair, so the panel never saw its private key. The config
+            below has no PrivateKey line; the app that owns the key fills it in.
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="flex justify-center">
-        {config ? (
+        {config && peer.key_on_client ? (
+          <pre className="bg-muted max-h-64 w-full overflow-auto rounded-lg p-3 font-mono text-xs">
+            {config}
+          </pre>
+        ) : config ? (
           // A white quiet zone keeps the code scannable in dark mode too.
           <div className="rounded-lg bg-white p-3">
             <QRCodeSVG value={config} size={224} marginSize={0} />

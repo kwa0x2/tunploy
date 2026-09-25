@@ -34,7 +34,7 @@ var Groups = []Group{
 	{ID: "failed_logins", Kinds: []string{"auth.login_failed"}},
 	{ID: "security", Kinds: []string{"auth.password_changed", "auth.totp_enabled", "auth.totp_disabled",
 		"settings.domain_changed", "settings.notifications_changed", "settings.backups_changed",
-		"backup.downloaded", "backup.restored"}},
+		"backup.downloaded", "backup.restored", "apikey.created", "apikey.revoked"}},
 	{ID: "backups", Kinds: []string{"backup.failed"}},
 	{ID: "logins", Kinds: []string{"auth.login"}},
 	{ID: "connections", Kinds: []string{"device.connected", "device.disconnected"}},
@@ -237,6 +237,14 @@ func writeEvent(b *strings.Builder, e store.Event) {
 	}
 	line("IP", ip)
 	line("Details", e.Detail)
+	line("By", actorText(e.Actor))
+}
+
+func actorText(actor string) string {
+	if name, ok := strings.CutPrefix(actor, "api:"); ok {
+		return "API key " + name
+	}
+	return actor
 }
 
 func Describe(e store.Event) string {
@@ -326,6 +334,10 @@ func Describe(e store.Event) string {
 		return "Two-factor authentication was turned on"
 	case "auth.totp_disabled":
 		return "Two-factor authentication was turned off"
+	case "apikey.created":
+		return "An API key was created"
+	case "apikey.revoked":
+		return "An API key was revoked"
 	}
 	return e.Kind
 }

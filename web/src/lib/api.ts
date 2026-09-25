@@ -115,6 +115,10 @@ export interface Peer {
   data_limit: number
   expires_at?: string
   last_handshake?: string
+  // Set by an API client for its own user.
+  external_id?: string
+  // The client made its key pair, so the panel has no private key to show.
+  key_on_client?: boolean
   created_at: string
   updated_at: string
   stats?: PeerStats
@@ -146,7 +150,32 @@ export interface ActivityEvent {
   ip?: string
   country?: string
   detail?: string
+  // "api:<key name>" when an API key made the change.
+  actor?: string
 }
+
+export type ApiScope = "devices:read" | "devices:write" | "servers:read" | "events:read"
+
+export interface ApiKey {
+  id: number
+  name: string
+  // The start of the key, to tell keys apart.
+  prefix: string
+  scopes: ApiScope[]
+  expires_at?: string
+  last_used_at?: string
+  last_used_ip?: string
+  created_at: string
+}
+
+export interface ApiKeyInput {
+  name: string
+  scopes: ApiScope[]
+  expires_at?: string
+}
+
+// token is shown this once; the panel keeps only its hash.
+export type CreatedApiKey = ApiKey & { token: string }
 
 export interface Release {
   version: string
@@ -570,6 +599,9 @@ export const api = {
   updateStatus: () => request<UpdateStatus>("/api/system/update"),
   checkUpdate: () => post<UpdateStatus>("/api/system/update/check"),
   startUpdate: () => post<UpdateStatus>("/api/system/update"),
+  apiKeys: () => request<ApiKey[]>("/api/api-keys"),
+  createApiKey: (input: ApiKeyInput) => post<CreatedApiKey>("/api/api-keys", input),
+  deleteApiKey: (id: number) => del(`/api/api-keys/${id}`),
   events: (opts: { limit: number; category?: EventCategory }) =>
     request<ActivityEvent[]>(
       `/api/events?limit=${opts.limit}${opts.category ? `&category=${opts.category}` : ""}`,

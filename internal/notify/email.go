@@ -88,6 +88,7 @@ func eventRows(e store.Event) []row {
 	}
 	add("IP", ip)
 	add("Details", e.Detail)
+	add("By", actorText(e.Actor))
 	return rows
 }
 

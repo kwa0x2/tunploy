@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -16,7 +17,7 @@ const instanceColumns = `id, node_id, name, address, listen_port, private_key, p
 	dns, mtu, persistent_keepalive, client_allowed_ips, created_at, updated_at`
 
 const peerColumns = `id, instance_id, name, address, private_key, public_key, preshared_key,
-	enabled, data_limit, expires_at, last_handshake, created_at, updated_at`
+	enabled, data_limit, expires_at, last_handshake, external_id, metadata, created_at, updated_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -122,10 +123,11 @@ func (s *Store) CreatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 	now := time.Now().Unix()
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO wg_peers (instance_id, name, address, private_key, public_key, preshared_key,
-			enabled, data_limit, expires_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.InstanceID, p.Name, p.Address.String(), p.PrivateKey.String(), p.PublicKey.String(),
-		p.PresharedKey.String(), p.Enabled, p.DataLimit, nullTime(p.ExpiresAt), now, now)
+			enabled, data_limit, expires_at, external_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.InstanceID, p.Name, p.Address.String(), privateKeyText(p), p.PublicKey.String(),
+		p.PresharedKey.String(), p.Enabled, p.DataLimit, nullTime(p.ExpiresAt), p.ExternalID, string(p.Metadata),
+		now, now)
 	if err != nil {
 		return nil, writeError("create peer", err)
 	}
@@ -207,9 +209,11 @@ func (s *Store) PeerByID(ctx context.Context, id int64) (*wg.Peer, error) {
 
 func (s *Store) UpdatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE wg_peers SET name = ?, enabled = ?, data_limit = ?, expires_at = ?, updated_at = ?
+		`UPDATE wg_peers SET name = ?, enabled = ?, data_limit = ?, expires_at = ?, external_id = ?, metadata = ?,
+			updated_at = ?
 		 WHERE id = ?`,
-		p.Name, p.Enabled, p.DataLimit, nullTime(p.ExpiresAt), time.Now().Unix(), p.ID)
+		p.Name, p.Enabled, p.DataLimit, nullTime(p.ExpiresAt), p.ExternalID, string(p.Metadata),
+		time.Now().Unix(), p.ID)
 	if err != nil {
 		return nil, writeError("update peer", err)
 	}
@@ -261,11 +265,12 @@ func scanPeer(row rowScanner) (*wg.Peer, error) {
 	var (
 		p                       wg.Peer
 		address, priv, pub, psk string
+		metadata                string
 		expires, handshake      sql.NullInt64
 		created, updated        int64
 	)
 	err := row.Scan(&p.ID, &p.InstanceID, &p.Name, &address, &priv, &pub, &psk,
-		&p.Enabled, &p.DataLimit, &expires, &handshake, &created, &updated)
+		&p.Enabled, &p.DataLimit, &expires, &handshake, &p.ExternalID, &metadata, &created, &updated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -275,18 +280,30 @@ func scanPeer(row rowScanner) (*wg.Peer, error) {
 
 	var errs [4]error
 	p.Address, errs[0] = netip.ParseAddr(address)
-	p.PrivateKey, errs[1] = wg.ParseKey(priv)
+	if priv != "" {
+		p.PrivateKey, errs[1] = wg.ParseKey(priv)
+	}
 	p.PublicKey, errs[2] = wg.ParseKey(pub)
 	p.PresharedKey, errs[3] = wg.ParseKey(psk)
 	if err := errors.Join(errs[:]...); err != nil {
 		return nil, fmt.Errorf("peer %d has corrupt data: %w", p.ID, err)
 	}
 
+	if metadata != "" {
+		p.Metadata = json.RawMessage(metadata)
+	}
 	p.ExpiresAt = timeOf(expires)
 	p.LastHandshake = timeOf(handshake)
 	p.CreatedAt = time.Unix(created, 0).UTC()
 	p.UpdatedAt = time.Unix(updated, 0).UTC()
 	return &p, nil
+}
+
+func privateKeyText(p wg.Peer) string {
+	if p.KeyOnClient() {
+		return ""
+	}
+	return p.PrivateKey.String()
 }
 
 func nullTime(t *time.Time) sql.NullInt64 {

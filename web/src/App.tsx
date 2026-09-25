@@ -11,6 +11,7 @@ import { OverviewPage } from "@/pages/overview"
 import { PeersPage } from "@/pages/peers"
 import { ServerDetailPage } from "@/pages/server-detail"
 import { ServersPage } from "@/pages/servers"
+import { ApiKeysSettingsPage } from "@/pages/settings/api-keys"
 import { BackupsSettingsPage } from "@/pages/settings/backups"
 import { DomainSettingsPage } from "@/pages/settings/domain"
 import { GeneralSettingsPage } from "@/pages/settings/general"
@@ -62,6 +63,7 @@ function Routing() {
         <Route path="/settings/security" element={<SecuritySettingsPage />} />
         <Route path="/settings/notifications" element={<NotificationsSettingsPage />} />
         <Route path="/settings/backups" element={<BackupsSettingsPage />} />
+        <Route path="/settings/api-keys" element={<ApiKeysSettingsPage />} />
         <Route path="/settings/updates" element={<UpdatesSettingsPage />} />
       </Route>
       <Route path="/login" element={<Navigate to="/" replace />} />

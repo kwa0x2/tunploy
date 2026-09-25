@@ -104,3 +104,13 @@ func (a *activity) reset() {
 	defer a.mu.Unlock()
 	a.peers = map[int64]map[wg.Key]sample{}
 }
+
+func (a *activity) online(instanceID int64) map[wg.Key]bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make(map[wg.Key]bool, len(a.peers[instanceID]))
+	for k, s := range a.peers[instanceID] {
+		out[k] = s.online
+	}
+	return out
+}

@@ -44,7 +44,10 @@ func ClientConfig(in Instance, p Peer) []byte {
 	var b bytes.Buffer
 
 	b.WriteString("[Interface]\n")
-	field(&b, "PrivateKey", p.PrivateKey.String())
+	// The client that holds the key fills it in.
+	if !p.KeyOnClient() {
+		field(&b, "PrivateKey", p.PrivateKey.String())
+	}
 	field(&b, "Address", netip.PrefixFrom(p.Address, p.Address.BitLen()).String())
 	if len(in.DNS) > 0 {
 		field(&b, "DNS", join(in.DNS))

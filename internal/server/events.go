@@ -62,9 +62,12 @@ func (s *Server) record(ctx context.Context, e store.Event) {
 		}
 	}
 
+	if e.Actor == "" {
+		e.Actor = actorFrom(ctx)
+	}
 	attrs := []any{"kind", e.Kind}
 	for _, kv := range [][2]string{
-		{"node", e.NodeName}, {"server", e.InstanceName}, {"device", e.PeerName}, {"ip", e.IP}, {"country", e.Country}, {"detail", e.Detail},
+		{"actor", e.Actor}, {"node", e.NodeName}, {"server", e.InstanceName}, {"device", e.PeerName}, {"ip", e.IP}, {"country", e.Country}, {"detail", e.Detail},
 	} {
 		if kv[1] != "" {
 			attrs = append(attrs, kv[0], kv[1])

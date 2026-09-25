@@ -46,10 +46,11 @@ func (o *optional[T]) UnmarshalJSON(b []byte) error {
 
 type peerView struct {
 	wg.Peer
-	Stats      *wg.PeerStats `json:"stats,omitempty"`
-	Country    string        `json:"country,omitempty"`
-	MonthUsage wg.Traffic    `json:"month_usage"`
-	Blocked    wg.Block      `json:"blocked,omitempty"`
+	KeyOnClient bool          `json:"key_on_client,omitempty"`
+	Stats       *wg.PeerStats `json:"stats,omitempty"`
+	Country     string        `json:"country,omitempty"`
+	MonthUsage  wg.Traffic    `json:"month_usage"`
+	Blocked     wg.Block      `json:"blocked,omitempty"`
 }
 
 type usageView struct {
@@ -94,7 +95,7 @@ func (s *Server) peerViews(ctx context.Context, instanceID int64, peers []wg.Pee
 	}
 	views := make([]peerView, len(peers))
 	for i, p := range peers {
-		views[i] = peerView{Peer: p, MonthUsage: usage[p.ID], Blocked: p.Blocked(usage[p.ID], now)}
+		views[i] = peerView{Peer: p, KeyOnClient: p.KeyOnClient(), MonthUsage: usage[p.ID], Blocked: p.Blocked(usage[p.ID], now)}
 	}
 	return views, nil
 }
@@ -131,25 +132,12 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) error 
 
 	p := wg.NewPeer(in.ID, "")
 	req.apply(&p)
-	if fields := p.Validate(); len(fields) > 0 {
-		return httpx.Invalid(fields)
+	created, err := s.createPeer(r.Context(), in, p)
+	if errors.Is(err, wg.ErrSubnetFull) {
+		return httpx.Errorf(http.StatusConflict, "subnet_full", "no free addresses left in %s", in.Subnet())
 	}
-
-	created, err := s.store.CreatePeer(r.Context(), p)
 	if err != nil {
-		if errors.Is(err, wg.ErrSubnetFull) {
-			return httpx.Errorf(http.StatusConflict, "subnet_full",
-				"no free addresses left in %s", in.Subnet())
-		}
-		return peerWriteError(err)
-	}
-	e := peerEvent("device.created", in, created)
-	if hasLimits(created) {
-		e.Detail = limitsDetail(created)
-	}
-	s.record(r.Context(), e)
-	if err := s.deploy.Apply(r.Context(), in.ID); err != nil {
-		return applyError(err)
+		return err
 	}
 	view, err := s.peerView(r.Context(), created)
 	if err != nil {
@@ -168,34 +156,11 @@ func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 
-	before := *p
-	req.apply(p)
-	if fields := p.Validate(); len(fields) > 0 {
-		return httpx.Invalid(fields)
-	}
-	updated, err := s.store.UpdatePeer(r.Context(), *p)
+	next := *p
+	req.apply(&next)
+	updated, err := s.updatePeer(r.Context(), in, *p, next)
 	if err != nil {
-		return peerWriteError(err)
-	}
-	if updated.Name != before.Name {
-		e := peerEvent("device.renamed", in, updated)
-		e.Detail = "was " + before.Name
-		s.record(r.Context(), e)
-	}
-	if updated.Enabled != before.Enabled {
-		kind := "device.disabled"
-		if updated.Enabled {
-			kind = "device.enabled"
-		}
-		s.record(r.Context(), peerEvent(kind, in, updated))
-	}
-	if limitsDetail(updated) != limitsDetail(&before) {
-		e := peerEvent("device.limits_changed", in, updated)
-		e.Detail = limitsDetail(updated)
-		s.record(r.Context(), e)
-	}
-	if err := s.deploy.Apply(r.Context(), updated.InstanceID); err != nil {
-		return applyError(err)
+		return err
 	}
 	view, err := s.peerView(r.Context(), updated)
 	if err != nil {
@@ -209,14 +174,76 @@ func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	if err := s.store.DeletePeer(r.Context(), p.ID); err != nil {
+	if err := s.deletePeer(r.Context(), in, p); err != nil {
 		return err
 	}
-	s.record(r.Context(), peerEvent("device.deleted", in, p))
-	if err := s.deploy.Apply(r.Context(), p.InstanceID); err != nil {
+	return httpx.NoContent(w)
+}
+
+// The panel and /api/v1 share these three, so both record the same events.
+// A failed apply still returns the saved peer along with the error.
+func (s *Server) createPeer(ctx context.Context, in *wg.Instance, p wg.Peer) (*wg.Peer, error) {
+	if fields := p.Validate(); len(fields) > 0 {
+		return nil, httpx.Invalid(fields)
+	}
+	created, err := s.store.CreatePeer(ctx, p)
+	if err != nil {
+		if errors.Is(err, wg.ErrSubnetFull) {
+			return nil, err
+		}
+		return nil, peerWriteError(err)
+	}
+	e := peerEvent("device.created", in, created)
+	if hasLimits(created) {
+		e.Detail = limitsDetail(created)
+	}
+	s.record(ctx, e)
+	if err := s.deploy.Apply(ctx, in.ID); err != nil {
+		return created, applyError(err)
+	}
+	return created, nil
+}
+
+func (s *Server) updatePeer(ctx context.Context, in *wg.Instance, before, p wg.Peer) (*wg.Peer, error) {
+	if fields := p.Validate(); len(fields) > 0 {
+		return nil, httpx.Invalid(fields)
+	}
+	updated, err := s.store.UpdatePeer(ctx, p)
+	if err != nil {
+		return nil, peerWriteError(err)
+	}
+	if updated.Name != before.Name {
+		e := peerEvent("device.renamed", in, updated)
+		e.Detail = "was " + before.Name
+		s.record(ctx, e)
+	}
+	if updated.Enabled != before.Enabled {
+		kind := "device.disabled"
+		if updated.Enabled {
+			kind = "device.enabled"
+		}
+		s.record(ctx, peerEvent(kind, in, updated))
+	}
+	if limitsDetail(updated) != limitsDetail(&before) {
+		e := peerEvent("device.limits_changed", in, updated)
+		e.Detail = limitsDetail(updated)
+		s.record(ctx, e)
+	}
+	if err := s.deploy.Apply(ctx, updated.InstanceID); err != nil {
+		return updated, applyError(err)
+	}
+	return updated, nil
+}
+
+func (s *Server) deletePeer(ctx context.Context, in *wg.Instance, p *wg.Peer) error {
+	if err := s.store.DeletePeer(ctx, p.ID); err != nil {
+		return err
+	}
+	s.record(ctx, peerEvent("device.deleted", in, p))
+	if err := s.deploy.Apply(ctx, p.InstanceID); err != nil {
 		return applyError(err)
 	}
-	return httpx.NoContent(w)
+	return nil
 }
 
 // Most clients name the tunnel after the file, capped at 15 characters.
@@ -308,8 +335,13 @@ func formatBytes(n int64) string {
 
 func peerWriteError(err error) error {
 	var dup *store.DuplicateError
-	if errors.As(err, &dup) && dup.Column == "name" {
-		return httpx.Invalid(map[string]string{"name": "a peer with this name already exists"})
+	if errors.As(err, &dup) {
+		switch dup.Column {
+		case "name":
+			return httpx.Invalid(map[string]string{"name": "a peer with this name already exists"})
+		case "public_key":
+			return httpx.Invalid(map[string]string{"public_key": "another device already uses this public key"})
+		}
 	}
 	return err
 }

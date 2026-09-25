@@ -21,6 +21,7 @@ Tunploy runs as a single Docker container on your Linux server. From its web pan
 - **Two-factor sign-in** with any authenticator app.
 - **Email notifications** when servers go down, devices hit their limit, sign-ins fail and more.
 - **Backups** to your computer or any S3-compatible storage, on a schedule, optionally encrypted.
+- **An HTTP API** with scoped keys, so a billing backend, bot or script can create and manage devices.
 - **In-panel updates** that roll back on their own if the new version doesn't start.
 - **A `tunploy` command** on the server for resetting the admin password, restoring backups, reading logs and uninstalling.
 
@@ -57,6 +58,7 @@ Open `http://YOUR_SERVER_IP:3000`, sign in, and [create your first VPN](#create-
   - [Two-factor authentication](#two-factor-authentication)
   - [Email notifications](#email-notifications)
   - [Backups](#backups)
+  - [API](#api)
 - [Maintenance](#maintenance)
   - [Updating](#updating)
   - [Server commands](#server-commands)
@@ -272,6 +274,52 @@ docker run --rm -it -v /var/lib/tunploy:/var/lib/tunploy -v "$PWD":/backup \
   ghcr.io/kwa0x2/tunploy:latest backup restore /backup/tunploy-backup-20260925-030000.tar.gz
 docker start tunploy
 ```
+
+### API
+
+Other programs can manage devices through `/api/v1`: a site that sells VPN access, a Telegram bot, an HR tool that gives new staff a VPN. Create a key under **Settings → API keys**, choose what it may do, and copy it; the panel shows it once and keeps only its hash. Send it as a Bearer token:
+
+```sh
+curl https://vpn.example.com/api/v1/servers -H "Authorization: Bearer tp_..."
+```
+
+Keep keys on your own server. A key built into a mobile app or web page can be pulled out by anyone who installs it.
+
+| Scope | Allows |
+| --- | --- |
+| `devices:read` | list devices, read their config (`.conf` or QR code) and usage |
+| `devices:write` | create, change, turn off and delete devices |
+| `servers:read` | list servers, their status and how many devices still fit |
+| `events:read` | read device, server and node events |
+
+| Endpoint | |
+| --- | --- |
+| `GET /api/v1/devices` | filter with `server_id`, `external_id`, `status` (`active`, `disabled`, `expired`, `limit_reached`) |
+| `POST /api/v1/devices` | `server_id`, and optionally `name`, `public_key`, `external_id`, `metadata`, `enabled`, `data_limit`, `expires_at` |
+| `GET`, `PATCH`, `DELETE /api/v1/devices/{id}` | `PATCH` takes the fields of a create except `server_id` and `public_key`; `null` clears `metadata` or `expires_at` |
+| `GET /api/v1/devices/{id}/config` | the `.conf` file, or a PNG QR code with `?format=qr` |
+| `GET /api/v1/devices/{id}/usage` | this month, plus daily and monthly traffic |
+| `GET /api/v1/servers`, `GET /api/v1/servers/{id}` | |
+| `GET /api/v1/events` | oldest first; keep the last `id` you saw and ask again with `?after=`. Filter with `kind`, `server_id`, `device_id` |
+
+Creating a device returns it with its config:
+
+```sh
+curl https://vpn.example.com/api/v1/devices \
+  -H "Authorization: Bearer tp_..." \
+  -H "Idempotency-Key: order-1042" \
+  -H "Content-Type: application/json" \
+  -d '{"server_id": 1, "external_id": "user_123", "data_limit": 53687091200, "expires_at": "2026-10-25T00:00:00Z"}'
+```
+
+- **`external_id`** is your own user's ID. It need not be unique, so one user can have several devices; find them with `?external_id=`. **`metadata`** is any JSON object up to 4 KB, stored as given.
+- **`public_key`**: an app that makes its own key pair sends only the public half, and the private key never reaches the panel. The returned config then has no `PrivateKey` line for the app to fill in. Without it, the panel makes the keys as it does for devices added in the panel.
+- **`Idempotency-Key`** on a `POST` makes a retry safe: the same key with the same body returns the first reply (with `Idempotent-Replayed: true`) instead of making a second device. Keys are remembered for 24 hours, per API key.
+- **Lists** return `{"data": [...], "has_more": true}`; ask for the next page with `?after=<last id>`, and up to 200 at a time with `limit`.
+- **Errors** look like the panel's: `{"error": {"code": "validation_failed", "message": "...", "fields": {...}}}`. A full server answers `server_full`.
+- Each key may make 10 requests a second, with bursts of up to 60; past that the reply is `429` with `Retry-After`.
+
+Changes made with a key show up in the activity log and in emails as "via API key <name>". Restoring a backup brings keys back; revoking one stops it at once.
 
 ## Maintenance
 
