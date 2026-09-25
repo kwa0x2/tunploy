@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	_ "time/tzdata" // TZ works even in an image without a zoneinfo directory
 
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"

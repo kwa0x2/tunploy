@@ -76,6 +76,9 @@ func (p Peer) Validate() map[string]string {
 	if msg := checkName(p.Name); msg != "" {
 		fields["name"] = msg
 	}
+	if p.DataLimit < 0 {
+		fields["data_limit"] = "data limit must be 0 (no limit) or more"
+	}
 	return fields
 }
 

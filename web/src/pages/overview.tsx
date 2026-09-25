@@ -15,14 +15,21 @@ import type { Instance } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { loadFleet } from "@/lib/fleet"
 import type { Fleet } from "@/lib/fleet"
-import { countryFlag, countryName, endpointOf, formatBytes, formatRelative, isOnline } from "@/lib/format"
+import {
+  countryFlag,
+  countryName,
+  endpointOf,
+  formatBytes,
+  formatRelative,
+  isOnline,
+  lastSeen,
+  monthTotal,
+} from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 type FleetPeer = Fleet["peers"][number]
 
 const brandTone = "bg-yellow-400/20 text-yellow-700 dark:text-yellow-300"
-
-const totalBytes = (p: FleetPeer) => (p.stats ? p.stats.rx_bytes + p.stats.tx_bytes : 0)
 
 export function OverviewPage() {
   const fleet = useResource(loadFleet, 10_000)
@@ -35,8 +42,8 @@ export function OverviewPage() {
   const enabled = data?.peers.filter((p) => p.enabled) ?? []
   const running = data?.instances.filter((i) => i.status.state === "running") ?? []
   // Devices download what the server sends them, so tx is their download.
-  const down = data?.peers.reduce((sum, p) => sum + (p.stats?.tx_bytes ?? 0), 0) ?? 0
-  const up = data?.peers.reduce((sum, p) => sum + (p.stats?.rx_bytes ?? 0), 0) ?? 0
+  const down = data?.peers.reduce((sum, p) => sum + p.month_usage.tx_bytes, 0) ?? 0
+  const up = data?.peers.reduce((sum, p) => sum + p.month_usage.rx_bytes, 0) ?? 0
 
   return (
     <>
@@ -84,7 +91,7 @@ export function OverviewPage() {
             tone="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
           />
           <StatTile
-            label="Traffic"
+            label="Traffic this month"
             value={data && formatBytes(down + up)}
             detail={`↓ ${formatBytes(down)} · ↑ ${formatBytes(up)}`}
             icon={ArrowDownUp}
@@ -191,7 +198,7 @@ function ServersCard({ instances, peers }: { instances: Instance[]; peers: Fleet
           const own = peers.filter((p) => p.instance_id === instance.id)
           const enabled = own.filter((p) => p.enabled).length
           const online = own.filter((p) => isOnline(p)).length
-          const traffic = own.reduce((sum, p) => sum + totalBytes(p), 0)
+          const traffic = own.reduce((sum, p) => sum + monthTotal(p), 0)
           return (
             <Link
               key={instance.id}
@@ -245,16 +252,16 @@ function Meter({ value, max, label }: { value: number; max: number; label: strin
 
 function TopTrafficCard({ peers }: { peers: FleetPeer[] }) {
   const top = peers
-    .filter((p) => totalBytes(p) > 0)
-    .sort((a, b) => totalBytes(b) - totalBytes(a))
+    .filter((p) => monthTotal(p) > 0)
+    .sort((a, b) => monthTotal(b) - monthTotal(a))
     .slice(0, 5)
-  const max = top.length ? totalBytes(top[0]) : 0
+  const max = top.length ? monthTotal(top[0]) : 0
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Top devices by traffic</CardTitle>
-        <CardDescription>Since each server last started.</CardDescription>
+        <CardDescription>This month.</CardDescription>
       </CardHeader>
       <CardContent>
         {top.length === 0 ? (
@@ -264,19 +271,19 @@ function TopTrafficCard({ peers }: { peers: FleetPeer[] }) {
             {top.map((peer) => (
               <li
                 key={peer.id}
-                title={`↓ ${formatBytes(peer.stats?.tx_bytes ?? 0)} downloaded · ↑ ${formatBytes(peer.stats?.rx_bytes ?? 0)} uploaded`}
+                title={`↓ ${formatBytes(peer.month_usage.tx_bytes)} downloaded · ↑ ${formatBytes(peer.month_usage.rx_bytes)} uploaded`}
               >
                 <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
                   <span className="min-w-0 truncate">
                     <span className="font-medium">{peer.name}</span>
                     <span className="text-muted-foreground"> · {peer.instance.name}</span>
                   </span>
-                  <span className="shrink-0 tabular-nums">{formatBytes(totalBytes(peer))}</span>
+                  <span className="shrink-0 tabular-nums">{formatBytes(monthTotal(peer))}</span>
                 </div>
                 <div className="bg-muted h-2 overflow-hidden rounded-full">
                   <div
                     className="bg-chart-1 h-full rounded-full"
-                    style={{ width: `${Math.max(2, (totalBytes(peer) / max) * 100)}%` }}
+                    style={{ width: `${Math.max(2, (monthTotal(peer) / max) * 100)}%` }}
                   />
                 </div>
               </li>
@@ -290,8 +297,11 @@ function TopTrafficCard({ peers }: { peers: FleetPeer[] }) {
 
 function RecentCard({ peers, now }: { peers: FleetPeer[]; now: number }) {
   const recent = peers
-    .filter((p) => p.stats?.latest_handshake)
-    .sort((a, b) => b.stats!.latest_handshake!.localeCompare(a.stats!.latest_handshake!))
+    .flatMap((p) => {
+      const seen = lastSeen(p)
+      return seen ? [{ ...p, seen }] : []
+    })
+    .sort((a, b) => b.seen.localeCompare(a.seen))
     .slice(0, 5)
 
   return (
@@ -325,7 +335,8 @@ function RecentCard({ peers, now }: { peers: FleetPeer[]; now: number }) {
                 <PeerStatus
                   enabled={peer.enabled}
                   online={isOnline(peer)}
-                  lastSeen={formatRelative(peer.stats!.latest_handshake!, now)}
+                  lastSeen={formatRelative(peer.seen, now)}
+                  blocked={peer.blocked}
                 />
               </li>
             ))}

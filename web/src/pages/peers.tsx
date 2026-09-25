@@ -11,11 +11,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { PageHeader } from "@/components/page-header"
-import { DeviceIcon, GeoAttribution, Location, PeerStatus, PeerTraffic } from "@/components/status"
+import { DeviceIcon, GeoAttribution, Location, MonthUsage, PeerStatus } from "@/components/status"
 import { useNow } from "@/hooks/use-now"
 import { useResource } from "@/hooks/use-resource"
 import { loadFleet } from "@/lib/fleet"
-import { endpointHost, errorMessage, formatRelative, isOnline } from "@/lib/format"
+import { endpointHost, errorMessage, formatRelative, isOnline, lastSeen } from "@/lib/format"
 
 export function PeersPage() {
   const { data, error } = useResource(loadFleet, 10_000)
@@ -58,12 +58,12 @@ export function PeersPage() {
                     <TableHead>Address</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Location</TableHead>
-                    <TableHead>Traffic</TableHead>
+                    <TableHead>This month</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.peers.map((peer) => {
-                    const handshake = peer.stats?.latest_handshake
+                    const handshake = lastSeen(peer)
                     return (
                       <TableRow key={peer.id}>
                         <TableCell className="max-w-48 font-medium">
@@ -86,6 +86,7 @@ export function PeersPage() {
                             enabled={peer.enabled}
                             online={isOnline(peer)}
                             lastSeen={handshake && formatRelative(handshake, now)}
+                            blocked={peer.blocked}
                           />
                         </TableCell>
                         <TableCell>
@@ -95,7 +96,7 @@ export function PeersPage() {
                           />
                         </TableCell>
                         <TableCell>
-                          <PeerTraffic stats={peer.stats} />
+                          <MonthUsage peer={peer} />
                         </TableCell>
                       </TableRow>
                     )

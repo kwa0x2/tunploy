@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,6 +62,19 @@ type Manager struct {
 
 	activity     activity
 	onPeerChange func(PeerChange)
+
+	// What each instance's config was last written with; guarded by mu.
+	blocked     map[int64]map[int64]wg.Block
+	onPeerBlock func(PeerBlock)
+	now         func() time.Time
+}
+
+type PeerBlock struct {
+	InstanceID int64
+	Peer       wg.Peer
+	// Empty when the peer may connect again.
+	Reason wg.Block
+	Month  wg.Traffic
 }
 
 func New(st *store.Store, dk Docker, dataDir string) (*Manager, error) {
@@ -84,6 +98,8 @@ func New(st *store.Store, dk Docker, dataDir string) (*Manager, error) {
 		image:    imageTag(files),
 		files:    files,
 		activity: activity{peers: map[int64]map[wg.Key]sample{}},
+		blocked:  map[int64]map[int64]wg.Block{},
+		now:      time.Now,
 	}, nil
 }
 
@@ -252,6 +268,7 @@ func (m *Manager) Remove(ctx context.Context, instanceID int64) error {
 		return fmt.Errorf("remove config dir: %w", err)
 	}
 	m.activity.forget(instanceID)
+	delete(m.blocked, instanceID)
 	return nil
 }
 
@@ -259,7 +276,10 @@ func (m *Manager) Remove(ctx context.Context, instanceID int64) error {
 func (m *Manager) Apply(ctx context.Context, instanceID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.apply(ctx, instanceID)
+}
 
+func (m *Manager) apply(ctx context.Context, instanceID int64) error {
 	if err := m.writeConfig(ctx, instanceID); err != nil {
 		return err
 	}
@@ -288,7 +308,7 @@ func (m *Manager) PeerStats(ctx context.Context, in *wg.Instance) (map[wg.Key]wg
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range m.activity.observe(in.ID, stats, in.PersistentKeepalive, time.Now()) {
+	for _, c := range m.activity.observe(in.ID, stats, in.PersistentKeepalive, m.now()) {
 		if m.onPeerChange != nil {
 			m.onPeerChange(c)
 		}
@@ -299,6 +319,10 @@ func (m *Manager) PeerStats(ctx context.Context, in *wg.Instance) (map[wg.Key]wg
 // OnPeerChange must be set before Watch starts or requests arrive.
 func (m *Manager) OnPeerChange(fn func(PeerChange)) { m.onPeerChange = fn }
 
+// OnPeerBlock must be set before Watch starts.
+func (m *Manager) OnPeerBlock(fn func(PeerBlock)) { m.onPeerBlock = fn }
+
+// Watch is the only caller of RecordTraffic, which needs a single writer.
 func (m *Manager) Watch(ctx context.Context, every time.Duration) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
@@ -314,11 +338,68 @@ func (m *Manager) Watch(ctx context.Context, every time.Duration) {
 			continue
 		}
 		for i := range instances {
-			if _, err := m.PeerStats(ctx, &instances[i]); err != nil && ctx.Err() == nil {
+			if err := m.watchInstance(ctx, &instances[i]); err != nil && ctx.Err() == nil {
 				slog.Debug("watch peers", "instance", instances[i].ID, "error", err)
 			}
 		}
 	}
+}
+
+func (m *Manager) watchInstance(ctx context.Context, in *wg.Instance) error {
+	stats, err := m.PeerStats(ctx, in)
+	if err != nil {
+		return err
+	}
+	if err := m.store.RecordTraffic(ctx, in.ID, stats, m.now()); err != nil {
+		return err
+	}
+	return m.enforceLimits(ctx, in.ID)
+}
+
+// Limits change with time and traffic alone, so nothing else would notice.
+func (m *Manager) enforceLimits(ctx context.Context, instanceID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	peers, usage, next, err := m.blockedPeers(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	prev, known := m.blocked[instanceID]
+	if known && maps.Equal(prev, next) {
+		return nil
+	}
+	if err := m.apply(ctx, instanceID); err != nil {
+		return err
+	}
+	if !known || m.onPeerBlock == nil {
+		return nil
+	}
+	for _, p := range peers {
+		if prev[p.ID] != next[p.ID] {
+			m.onPeerBlock(PeerBlock{InstanceID: instanceID, Peer: p, Reason: next[p.ID], Month: usage[p.ID]})
+		}
+	}
+	return nil
+}
+
+func (m *Manager) blockedPeers(ctx context.Context, instanceID int64) ([]wg.Peer, map[int64]wg.Traffic, map[int64]wg.Block, error) {
+	now := m.now()
+	peers, err := m.store.Peers(ctx, instanceID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	usage, err := m.store.MonthUsage(ctx, instanceID, now)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	blocked := map[int64]wg.Block{}
+	for _, p := range peers {
+		if b := p.Blocked(usage[p.ID], now); b != "" {
+			blocked[p.ID] = b
+		}
+	}
+	return peers, usage, blocked, nil
 }
 
 var ErrNotDeployed = errors.New("instance has no container")
@@ -352,10 +433,11 @@ func (m *Manager) writeConfig(ctx context.Context, instanceID int64) error {
 	if err != nil {
 		return err
 	}
-	peers, err := m.store.Peers(ctx, instanceID)
+	peers, _, blocked, err := m.blockedPeers(ctx, instanceID)
 	if err != nil {
 		return err
 	}
+	allowed := slices.DeleteFunc(peers, func(p wg.Peer) bool { return blocked[p.ID] != "" })
 
 	dir := m.ConfigDir(instanceID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -368,7 +450,7 @@ func (m *Manager) writeConfig(ctx context.Context, instanceID int64) error {
 	}
 	defer os.Remove(tmp.Name())
 
-	if _, err := tmp.Write(wg.ServerConfig(*in, peers)); err != nil {
+	if _, err := tmp.Write(wg.ServerConfig(*in, allowed)); err != nil {
 		tmp.Close()
 		return fmt.Errorf("write config: %w", err)
 	}
@@ -378,5 +460,6 @@ func (m *Manager) writeConfig(ctx context.Context, instanceID int64) error {
 	if err := os.Rename(tmp.Name(), filepath.Join(dir, iface+".conf")); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
+	m.blocked[instanceID] = blocked
 	return nil
 }

@@ -49,6 +49,7 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, geo
 		lookupHost:    net.DefaultResolver.LookupHost,
 	}
 	mgr.OnPeerChange(s.peerChanged)
+	mgr.OnPeerBlock(s.peerBlocked)
 	s.closing, s.stopStreams = context.WithCancel(context.Background())
 	s.handler = chain(s.routes(), recoverPanics, s.identifyClient, securityHeaders, logRequests)
 	return s
@@ -99,6 +100,7 @@ func (s *Server) routes() http.Handler {
 	private.Handle("PATCH /api/instances/{id}/peers/{peerID}", httpx.Handler(s.handleUpdatePeer))
 	private.Handle("DELETE /api/instances/{id}/peers/{peerID}", httpx.Handler(s.handleDeletePeer))
 	private.Handle("GET /api/instances/{id}/peers/{peerID}/config", httpx.Handler(s.handlePeerConfig))
+	private.Handle("GET /api/instances/{id}/peers/{peerID}/usage", httpx.Handler(s.handlePeerUsage))
 
 	// Unmatched paths get the JSON envelope too.
 	private.Handle("/api/", httpx.Handler(func(w http.ResponseWriter, r *http.Request) error {

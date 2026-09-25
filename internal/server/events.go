@@ -115,6 +115,25 @@ func (s *Server) peerChanged(c deploy.PeerChange) {
 	}
 }
 
+func (s *Server) peerBlocked(b deploy.PeerBlock) {
+	ctx := context.Background()
+	in, err := s.store.InstanceByID(ctx, b.InstanceID)
+	if err != nil {
+		return
+	}
+	var e store.Event
+	switch b.Reason {
+	case wg.BlockLimit:
+		e = peerEvent("device.limit_reached", in, &b.Peer)
+		e.Detail = fmt.Sprintf("used %s of %s this month", formatBytes(b.Month.Total()), formatBytes(b.Peer.DataLimit))
+	case wg.BlockExpired:
+		e = peerEvent("device.expired", in, &b.Peer)
+	default:
+		e = peerEvent("device.unblocked", in, &b.Peer)
+	}
+	s.record(ctx, e)
+}
+
 func endpointHost(endpoint string) string {
 	ap, err := netip.ParseAddrPort(endpoint)
 	if err != nil {

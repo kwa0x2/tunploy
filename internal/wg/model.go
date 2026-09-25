@@ -45,8 +45,12 @@ type Peer struct {
 	PublicKey    Key        `json:"public_key"`
 	PresharedKey Key        `json:"-"`
 	Enabled      bool       `json:"enabled"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// Bytes per calendar month, both directions; 0 means no limit.
+	DataLimit     int64      `json:"data_limit"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	LastHandshake *time.Time `json:"last_handshake,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func NewInstance(name, endpoint string) Instance {

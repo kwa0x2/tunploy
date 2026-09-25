@@ -42,6 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh \
 | `TUNPLOY_PUBLIC_HOST` | detected public IPv4 | Hostname or IP that VPN clients dial. |
 | `TUNPLOY_HTTPS` | `true` | `false` leaves TCP 80 and 443 alone, for a server whose web server needs them. The panel then can't serve its own domain. |
 | `TUNPLOY_TRUSTED_PROXIES` | none | Your reverse proxy's addresses. See [behind your own reverse proxy](#behind-your-own-reverse-proxy). |
+| `TUNPLOY_TIMEZONE` | the server's time zone | Where days and months begin for data usage and monthly limits, for example `Europe/Istanbul`. |
 | `TUNPLOY_BIND` | `0.0.0.0` | Address the panel port listens on. `127.0.0.1` keeps it reachable only over an SSH tunnel. |
 | `TUNPLOY_PORT` | `3000` | Panel port. |
 | `TUNPLOY_VERSION` | `latest` | Image tag, for example `0.1.0` or `edge`. |
@@ -142,6 +143,7 @@ services:
       - "443:443"
     environment:
       TUNPLOY_PUBLIC_HOST: "YOUR_SERVER_IP"
+      TZ: "UTC" # your time zone; monthly data limits reset at its midnight
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Must be the same path on both sides.
@@ -168,6 +170,7 @@ docker exec -it tunploy tunploy admin create
 | `TUNPLOY_SECURE_COOKIES` | `false` | Force `Secure` cookies. Not needed with a panel domain or a trusted proxy that sends `X-Forwarded-Proto`. |
 | `TUNPLOY_GEOIP` | `true` | Show device countries. Downloads the free [DB-IP Lite](https://db-ip.com) database (about 8 MB) into the data dir and refreshes it monthly. Set to `false` to never contact db-ip.com. |
 | `TUNPLOY_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
+| `TZ` | `UTC` | Time zone for daily and monthly data usage, so monthly limits reset at your midnight, for example `Europe/Istanbul`. |
 
 ## Troubleshooting
 

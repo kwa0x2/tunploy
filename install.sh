@@ -17,6 +17,8 @@
 #                        can't serve its own HTTPS domain (default: true)
 #   TUNPLOY_TRUSTED_PROXIES
 #                        CIDRs of your own reverse proxy, whose X-Forwarded-For is believed
+#   TUNPLOY_TIMEZONE     time zone for daily and monthly data usage, e.g. Europe/Istanbul
+#                        (default: this server's time zone)
 #   TUNPLOY_ADMIN_NAME, TUNPLOY_ADMIN_EMAIL, TUNPLOY_ADMIN_PASSWORD
 #                        create the admin account without prompting
 set -eu
@@ -78,6 +80,8 @@ current_binding() {
 # Settings from an earlier install survive the upgrade unless given again.
 choose_settings() {
 	TRUSTED_PROXIES=${TUNPLOY_TRUSTED_PROXIES:-$(current_env TUNPLOY_TRUSTED_PROXIES)}
+	TIMEZONE=${TUNPLOY_TIMEZONE:-$(current_env TZ)}
+	TIMEZONE=${TIMEZONE:-$(host_timezone)}
 	HTTPS=${TUNPLOY_HTTPS:-$(current_env TUNPLOY_HTTPS)}
 	HTTPS=${HTTPS:-true}
 
@@ -87,6 +91,17 @@ choose_settings() {
 	# Public by default: there is no sign-up page to race for, since the admin
 	# is created below by whoever runs this script.
 	BIND=${TUNPLOY_BIND:-${1:-0.0.0.0}}
+}
+
+host_timezone() {
+	tz=$(timedatectl show -p Timezone --value 2>/dev/null || true)
+	if [ -z "$tz" ] && [ -f /etc/timezone ]; then
+		tz=$(cat /etc/timezone)
+	fi
+	if [ -z "$tz" ]; then
+		tz=$(readlink /etc/localtime 2>/dev/null | sed -n 's|.*/zoneinfo/||p')
+	fi
+	echo "${tz:-UTC}"
 }
 
 detect_public_host() {
@@ -117,7 +132,7 @@ install_panel() {
 
 	mkdir -p "$DATA_DIR"
 	info "Starting Tunploy"
-	set -- "$@" -p "$BIND:$PORT:3000"
+	set -- "$@" -p "$BIND:$PORT:3000" -e TZ="$TIMEZONE"
 	if [ -n "$TRUSTED_PROXIES" ]; then
 		set -- "$@" -e TUNPLOY_TRUSTED_PROXIES="$TRUSTED_PROXIES"
 	fi

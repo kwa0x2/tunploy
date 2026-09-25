@@ -1,6 +1,6 @@
 import { Smartphone } from "lucide-react"
-import type { InstanceState, PeerStats } from "@/lib/api"
-import { countryFlag, countryName, formatBytes } from "@/lib/format"
+import type { InstanceState, Peer, PeerBlock } from "@/lib/api"
+import { countryFlag, countryName, formatBytes, monthTotal } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const states: Record<InstanceState, { label: string; tone: string; dot: string }> = {
@@ -47,12 +47,29 @@ export function InstanceStatus({ state, className }: { state: InstanceState; cla
   )
 }
 
-export function PeerStatus({ online, enabled, lastSeen }: {
+const blocks: Record<PeerBlock, { label: string; title: string }> = {
+  limit: { label: "Limit reached", title: "Used up this month's data; back on the 1st" },
+  expired: { label: "Expired", title: "Access has ended; set a later date to let it back in" },
+}
+
+export function PeerStatus({ online, enabled, lastSeen, blocked }: {
   online: boolean
   enabled: boolean
   lastSeen?: string
+  blocked?: PeerBlock
 }) {
   if (!enabled) return <span className="text-muted-foreground text-xs">Disabled</span>
+  if (blocked) {
+    return (
+      <span
+        title={blocks[blocked].title}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-red-700 dark:text-red-400"
+      >
+        <span className="size-1.5 rounded-full bg-red-500" />
+        {blocks[blocked].label}
+      </span>
+    )
+  }
   return (
     <span
       className={cn(
@@ -69,14 +86,47 @@ export function PeerStatus({ online, enabled, lastSeen }: {
 }
 
 // Shown from the device's side: its download is what the server sent.
-export function PeerTraffic({ stats }: { stats?: PeerStats }) {
-  if (!stats) return <span className="text-muted-foreground">—</span>
+export function MonthUsage({ peer }: { peer: Peer }) {
+  const total = monthTotal(peer)
+  const title = `This month: ↓ ${formatBytes(peer.month_usage.tx_bytes)} downloaded · ↑ ${formatBytes(peer.month_usage.rx_bytes)} uploaded`
+
+  if (!peer.data_limit) {
+    return (
+      <span className="text-xs whitespace-nowrap tabular-nums" title={title}>
+        {total ? formatBytes(total) : <span className="text-muted-foreground">—</span>}
+      </span>
+    )
+  }
   return (
-    <span className="text-xs whitespace-nowrap tabular-nums">
-      <span title="Downloaded by the device">↓ {formatBytes(stats.tx_bytes)}</span>
-      <span className="text-muted-foreground mx-1.5">·</span>
-      <span title="Uploaded by the device">↑ {formatBytes(stats.rx_bytes)}</span>
-    </span>
+    <div className="w-28 space-y-1" title={title}>
+      <p className="text-xs whitespace-nowrap tabular-nums">
+        {formatBytes(total)}
+        <span className="text-muted-foreground"> / {formatBytes(peer.data_limit)}</span>
+      </p>
+      <UsageMeter used={total} limit={peer.data_limit} />
+    </div>
+  )
+}
+
+export function UsageMeter({ used, limit, className }: { used: number; limit: number; className?: string }) {
+  const pct = Math.min(100, (used / limit) * 100)
+  return (
+    <div
+      role="meter"
+      aria-label="Share of the monthly data limit used"
+      aria-valuenow={Math.round(pct)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className={cn("bg-muted h-1.5 overflow-hidden rounded-full", className)}
+    >
+      <div
+        className={cn(
+          "h-full rounded-full transition-[width]",
+          pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-sky-500",
+        )}
+        style={{ width: `${Math.max(pct, used > 0 ? 2 : 0)}%` }}
+      />
+    </div>
   )
 }
 

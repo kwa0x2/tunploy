@@ -2,6 +2,8 @@ import { useCallback, useState } from "react"
 import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import {
+  CalendarX,
+  Gauge,
   Globe,
   KeyRound,
   Pencil,
@@ -168,6 +170,14 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: Plug, tone: "neutral", text: <>{device} enabled on {server}</> }
     case "device.disabled":
       return { icon: Unplug, tone: "neutral", text: <>{device} disabled on {server}</> }
+    case "device.limits_changed":
+      return { icon: Gauge, tone: "neutral", text: <>Limits changed for {device} on {server}</> }
+    case "device.limit_reached":
+      return { icon: Gauge, tone: "bad", text: <>{device} reached its data limit on {server}</> }
+    case "device.expired":
+      return { icon: CalendarX, tone: "bad", text: <>Access for {device} on {server} ended</> }
+    case "device.unblocked":
+      return { icon: Plug, tone: "good", text: <>{device} can connect to {server} again</> }
     case "device.renamed":
       return { icon: Pencil, tone: "neutral", text: <>Device renamed to {device} on {server}</> }
     case "server.created":

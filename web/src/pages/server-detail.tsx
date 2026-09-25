@@ -3,7 +3,9 @@ import type { ReactNode } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
+  ChartColumn,
   Download,
+  Gauge,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -42,14 +44,15 @@ import { CopyButton } from "@/components/copy-button"
 import { InstanceFormDialog } from "@/components/instance-form-dialog"
 import { LogsDialog } from "@/components/logs-dialog"
 import { PageHeader } from "@/components/page-header"
-import { PeerConfigDialog, PeerNameDialog } from "@/components/peer-dialogs"
-import { DeviceIcon, InstanceStatus, Location, PeerStatus, PeerTraffic } from "@/components/status"
+import { PeerConfigDialog, PeerLimitsDialog, PeerNameDialog } from "@/components/peer-dialogs"
+import { PeerUsageDialog } from "@/components/peer-usage-dialog"
+import { DeviceIcon, InstanceStatus, Location, MonthUsage, PeerStatus } from "@/components/status"
 import { useNow } from "@/hooks/use-now"
 import { useResource } from "@/hooks/use-resource"
 import { useTarget } from "@/hooks/use-target"
 import { ApiError, api, peerConfigUrl } from "@/lib/api"
 import type { Instance, Peer } from "@/lib/api"
-import { endpointHost, endpointOf, errorMessage, formatRelative, isOnline } from "@/lib/format"
+import { endpointHost, endpointOf, errorMessage, formatRelative, isOnline, lastSeen } from "@/lib/format"
 
 const pollMs = 5_000
 
@@ -305,6 +308,8 @@ function PeersCard({ instance, peers, error, reload }: {
   const renaming = useTarget<Peer>()
   const deleting = useTarget<Peer>()
   const showing = useTarget<Peer>()
+  const usage = useTarget<Peer>()
+  const limiting = useTarget<Peer>()
   const [toggling, setToggling] = useState<number>()
 
   async function toggle(peer: Peer, enabled: boolean) {
@@ -353,21 +358,25 @@ function PeersCard({ instance, peers, error, reload }: {
                 <TableHead>Address</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Location</TableHead>
-                <TableHead>Traffic</TableHead>
+                <TableHead>This month</TableHead>
                 <TableHead>Enabled</TableHead>
                 <TableHead className="w-0" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {peers.map((peer) => {
-                const handshake = peer.stats?.latest_handshake
+                const handshake = lastSeen(peer)
                 return (
                   <TableRow key={peer.id}>
                     <TableCell className="max-w-48 font-medium">
-                      <span className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => usage.show(peer)}
+                        className="flex max-w-full items-center gap-2.5 text-left underline-offset-4 hover:underline"
+                      >
                         <DeviceIcon />
                         <span className="truncate">{peer.name}</span>
-                      </span>
+                      </button>
                     </TableCell>
                     <TableCell className="font-mono text-xs">{peer.address}</TableCell>
                     <TableCell>
@@ -375,6 +384,7 @@ function PeersCard({ instance, peers, error, reload }: {
                         enabled={peer.enabled}
                         online={isOnline(peer)}
                         lastSeen={handshake && formatRelative(handshake, now)}
+                        blocked={peer.blocked}
                       />
                     </TableCell>
                     <TableCell>
@@ -384,7 +394,7 @@ function PeersCard({ instance, peers, error, reload }: {
                       />
                     </TableCell>
                     <TableCell>
-                      <PeerTraffic stats={peer.stats} />
+                      <MonthUsage peer={peer} />
                     </TableCell>
                     <TableCell>
                       <Switch
@@ -422,6 +432,14 @@ function PeersCard({ instance, peers, error, reload }: {
                             >
                               <Download />
                               Download .conf
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => usage.show(peer)}>
+                              <ChartColumn />
+                              Usage
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => limiting.show(peer)}>
+                              <Gauge />
+                              Limits
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => renaming.show(peer)}>
                               <Pencil />
@@ -472,6 +490,25 @@ function PeersCard({ instance, peers, error, reload }: {
         peer={showing.target}
         open={showing.open}
         onOpenChange={showing.onOpenChange}
+      />
+      <PeerUsageDialog
+        peer={peers?.find((p) => p.id === usage.target?.id) ?? usage.target}
+        open={usage.open}
+        onOpenChange={usage.onOpenChange}
+        onEditLimits={(peer) => {
+          usage.onOpenChange(false)
+          limiting.show(peer)
+        }}
+      />
+      <PeerLimitsDialog
+        peer={limiting.target}
+        open={limiting.open}
+        onOpenChange={limiting.onOpenChange}
+        onSaved={({ warning }) => {
+          if (warning) toast.warning(warning)
+          else toast.success("Limits saved.")
+          void reload()
+        }}
       />
       <ConfirmDialog
         open={deleting.open}

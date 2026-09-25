@@ -93,6 +93,13 @@ export interface PeerStats {
   online: boolean
 }
 
+export interface Traffic {
+  rx_bytes: number
+  tx_bytes: number
+}
+
+export type PeerBlock = "limit" | "expired"
+
 export interface Peer {
   id: number
   instance_id: number
@@ -100,10 +107,25 @@ export interface Peer {
   address: string
   public_key: string
   enabled: boolean
+  // Bytes per calendar month, both directions; 0 means no limit.
+  data_limit: number
+  expires_at?: string
+  last_handshake?: string
   created_at: string
   updated_at: string
   stats?: PeerStats
   country?: string
+  month_usage: Traffic
+  blocked?: PeerBlock
+}
+
+export interface UsagePoint extends Traffic {
+  start: string
+}
+
+export interface PeerUsage {
+  daily: UsagePoint[]
+  monthly: UsagePoint[]
 }
 
 export type EventCategory = "connection" | "change" | "auth"
@@ -126,7 +148,13 @@ export interface DockerStatus {
   error?: string
 }
 
-export type PeerInput = { name?: string; enabled?: boolean }
+// null clears the expiry.
+export type PeerInput = {
+  name?: string
+  enabled?: boolean
+  data_limit?: number
+  expires_at?: string | null
+}
 
 export interface Settings {
   public_host: string
@@ -344,4 +372,6 @@ export const api = {
   deletePeer: (instanceId: number, peerId: number) => del(peerPath(instanceId, peerId)),
   peerConfig: (instanceId: number, peerId: number) =>
     fetchText(peerConfigUrl(instanceId, peerId)),
+  peerUsage: (instanceId: number, peerId: number) =>
+    request<PeerUsage>(`${peerPath(instanceId, peerId)}/usage`),
 }

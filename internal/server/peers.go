@@ -1,27 +1,60 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
 
+const (
+	usageDays   = 30
+	usageMonths = 12
+)
+
 type peerRequest struct {
-	Name    *string `json:"name"`
-	Enabled *bool   `json:"enabled"`
+	Name      *string             `json:"name"`
+	Enabled   *bool               `json:"enabled"`
+	DataLimit *int64              `json:"data_limit"`
+	ExpiresAt optional[time.Time] `json:"expires_at"`
+}
+
+// optional tells an explicit null, which clears a value, from a missing field.
+type optional[T any] struct {
+	Set   bool
+	Value *T
+}
+
+func (o *optional[T]) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	o.Value = new(T)
+	return json.Unmarshal(b, o.Value)
 }
 
 type peerView struct {
 	wg.Peer
-	Stats   *wg.PeerStats `json:"stats,omitempty"`
-	Country string        `json:"country,omitempty"`
+	Stats      *wg.PeerStats `json:"stats,omitempty"`
+	Country    string        `json:"country,omitempty"`
+	MonthUsage wg.Traffic    `json:"month_usage"`
+	Blocked    wg.Block      `json:"blocked,omitempty"`
+}
+
+type usageView struct {
+	Daily   []store.UsagePoint `json:"daily"`
+	Monthly []store.UsagePoint `json:"monthly"`
 }
 
 func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) error {
@@ -40,15 +73,50 @@ func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) error {
 		slog.Warn("read peer stats", "instance", in.ID, "error", err)
 	}
 
-	views := make([]peerView, len(peers))
-	for i, p := range peers {
-		views[i] = peerView{Peer: p}
-		if st, ok := stats[p.PublicKey]; ok {
+	views, err := s.peerViews(r.Context(), in.ID, peers)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		if st, ok := stats[views[i].PublicKey]; ok {
 			views[i].Stats = &st
 			views[i].Country = s.endpointCountry(st.Endpoint)
 		}
 	}
 	return httpx.JSON(w, http.StatusOK, views)
+}
+
+func (s *Server) peerViews(ctx context.Context, instanceID int64, peers []wg.Peer) ([]peerView, error) {
+	now := time.Now()
+	usage, err := s.store.MonthUsage(ctx, instanceID, now)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]peerView, len(peers))
+	for i, p := range peers {
+		views[i] = peerView{Peer: p, MonthUsage: usage[p.ID], Blocked: p.Blocked(usage[p.ID], now)}
+	}
+	return views, nil
+}
+
+func (s *Server) peerView(ctx context.Context, p *wg.Peer) (peerView, error) {
+	views, err := s.peerViews(ctx, p.InstanceID, []wg.Peer{*p})
+	if err != nil {
+		return peerView{}, err
+	}
+	return views[0], nil
+}
+
+func (s *Server) handlePeerUsage(w http.ResponseWriter, r *http.Request) error {
+	_, p, err := s.peerFromPath(r)
+	if err != nil {
+		return err
+	}
+	daily, monthly, err := s.store.PeerUsage(r.Context(), p.ID, time.Now(), usageDays, usageMonths)
+	if err != nil {
+		return err
+	}
+	return httpx.JSON(w, http.StatusOK, usageView{Daily: daily, Monthly: monthly})
 }
 
 func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) error {
@@ -75,11 +143,19 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) error 
 		}
 		return peerWriteError(err)
 	}
-	s.record(r.Context(), peerEvent("device.created", in, created))
+	e := peerEvent("device.created", in, created)
+	if hasLimits(created) {
+		e.Detail = limitsDetail(created)
+	}
+	s.record(r.Context(), e)
 	if err := s.deploy.Apply(r.Context(), in.ID); err != nil {
 		return applyError(err)
 	}
-	return httpx.JSON(w, http.StatusCreated, peerView{Peer: *created})
+	view, err := s.peerView(r.Context(), created)
+	if err != nil {
+		return err
+	}
+	return httpx.JSON(w, http.StatusCreated, view)
 }
 
 func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error {
@@ -113,10 +189,19 @@ func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error 
 		}
 		s.record(r.Context(), peerEvent(kind, in, updated))
 	}
+	if limitsDetail(updated) != limitsDetail(&before) {
+		e := peerEvent("device.limits_changed", in, updated)
+		e.Detail = limitsDetail(updated)
+		s.record(r.Context(), e)
+	}
 	if err := s.deploy.Apply(r.Context(), updated.InstanceID); err != nil {
 		return applyError(err)
 	}
-	return httpx.JSON(w, http.StatusOK, peerView{Peer: *updated})
+	view, err := s.peerView(r.Context(), updated)
+	if err != nil {
+		return err
+	}
+	return httpx.JSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) error {
@@ -172,6 +257,53 @@ func (req peerRequest) apply(p *wg.Peer) {
 	if req.Enabled != nil {
 		p.Enabled = *req.Enabled
 	}
+	if req.DataLimit != nil {
+		p.DataLimit = *req.DataLimit
+	}
+	if req.ExpiresAt.Set {
+		p.ExpiresAt = req.ExpiresAt.Value
+	}
+}
+
+func hasLimits(p *wg.Peer) bool { return p.DataLimit > 0 || p.ExpiresAt != nil }
+
+func limitsDetail(p *wg.Peer) string {
+	var parts []string
+	if p.DataLimit > 0 {
+		parts = append(parts, formatBytes(p.DataLimit)+" a month")
+	}
+	if p.ExpiresAt != nil {
+		parts = append(parts, "until "+expiryText(*p.ExpiresAt))
+	}
+	if len(parts) == 0 {
+		return "no limits"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// The panel sets expiries at midnight, which reads better as the day before.
+func expiryText(t time.Time) string {
+	t = t.In(time.Local)
+	if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 {
+		return "the end of " + t.AddDate(0, 0, -1).Format("2 Jan 2006")
+	}
+	return t.Format("2 Jan 2006 15:04")
+}
+
+func formatBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	v, i := float64(n)/unit, 0
+	for v >= unit && i < 3 {
+		v /= unit
+		i++
+	}
+	if v < 10 && v != float64(int64(v)) {
+		return fmt.Sprintf("%.1f %s", v, []string{"KB", "MB", "GB", "TB"}[i])
+	}
+	return fmt.Sprintf("%.0f %s", v, []string{"KB", "MB", "GB", "TB"}[i])
 }
 
 func peerWriteError(err error) error {

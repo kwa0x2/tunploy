@@ -16,7 +16,7 @@ const instanceColumns = `id, name, address, listen_port, private_key, public_key
 	dns, mtu, persistent_keepalive, client_allowed_ips, created_at, updated_at`
 
 const peerColumns = `id, instance_id, name, address, private_key, public_key, preshared_key,
-	enabled, created_at, updated_at`
+	enabled, data_limit, expires_at, last_handshake, created_at, updated_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -122,10 +122,10 @@ func (s *Store) CreatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 	now := time.Now().Unix()
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO wg_peers (instance_id, name, address, private_key, public_key, preshared_key,
-			enabled, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			enabled, data_limit, expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.InstanceID, p.Name, p.Address.String(), p.PrivateKey.String(), p.PublicKey.String(),
-		p.PresharedKey.String(), p.Enabled, now, now)
+		p.PresharedKey.String(), p.Enabled, p.DataLimit, nullTime(p.ExpiresAt), now, now)
 	if err != nil {
 		return nil, writeError("create peer", err)
 	}
@@ -207,8 +207,9 @@ func (s *Store) PeerByID(ctx context.Context, id int64) (*wg.Peer, error) {
 
 func (s *Store) UpdatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE wg_peers SET name = ?, enabled = ?, updated_at = ? WHERE id = ?`,
-		p.Name, p.Enabled, time.Now().Unix(), p.ID)
+		`UPDATE wg_peers SET name = ?, enabled = ?, data_limit = ?, expires_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		p.Name, p.Enabled, p.DataLimit, nullTime(p.ExpiresAt), time.Now().Unix(), p.ID)
 	if err != nil {
 		return nil, writeError("update peer", err)
 	}
@@ -260,10 +261,11 @@ func scanPeer(row rowScanner) (*wg.Peer, error) {
 	var (
 		p                       wg.Peer
 		address, priv, pub, psk string
+		expires, handshake      sql.NullInt64
 		created, updated        int64
 	)
 	err := row.Scan(&p.ID, &p.InstanceID, &p.Name, &address, &priv, &pub, &psk,
-		&p.Enabled, &created, &updated)
+		&p.Enabled, &p.DataLimit, &expires, &handshake, &created, &updated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -280,9 +282,26 @@ func scanPeer(row rowScanner) (*wg.Peer, error) {
 		return nil, fmt.Errorf("peer %d has corrupt data: %w", p.ID, err)
 	}
 
+	p.ExpiresAt = timeOf(expires)
+	p.LastHandshake = timeOf(handshake)
 	p.CreatedAt = time.Unix(created, 0).UTC()
 	p.UpdatedAt = time.Unix(updated, 0).UTC()
 	return &p, nil
+}
+
+func nullTime(t *time.Time) sql.NullInt64 {
+	if t == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: t.Unix(), Valid: true}
+}
+
+func timeOf(v sql.NullInt64) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	t := time.Unix(v.Int64, 0).UTC()
+	return &t
 }
 
 func expectOneRow(res sql.Result, op string) error {

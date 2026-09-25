@@ -27,6 +27,41 @@ export function isOnline(peer: Peer): boolean {
   return peer.stats?.online ?? false
 }
 
+// The live handshake is fresher; the stored one survives restarts and disabling.
+export function lastSeen(peer: Peer): string | undefined {
+  return peer.stats?.latest_handshake ?? peer.last_handshake
+}
+
+export const monthTotal = (peer: Peer) => peer.month_usage.rx_bytes + peer.month_usage.tx_bytes
+
+export const gib = 1024 ** 3
+
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+// The panel sets expiries at midnight, which reads better as the day before.
+export function formatExpiry(iso: string): string {
+  const d = new Date(iso)
+  if (d.getHours() || d.getMinutes() || d.getSeconds()) return formatDateTime(iso)
+  const day = new Date(d.getTime() - 1).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
+  return `end of ${day}`
+}
+
+export function nextMonthStart(now = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth() + 1, 1)
+}
+
 const regionNames = new Intl.DisplayNames(["en"], { type: "region" })
 
 export function countryName(code: string): string {
