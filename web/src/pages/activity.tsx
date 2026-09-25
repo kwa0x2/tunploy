@@ -5,6 +5,9 @@ import {
   CalendarX,
   Gauge,
   Globe,
+  HeartPulse,
+  Mail,
+  ServerCrash,
   KeyRound,
   Pencil,
   Plug,
@@ -194,6 +197,12 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: Square, tone: "neutral", text: <>Server {server} stopped</> }
     case "server.restarted":
       return { icon: RotateCw, tone: "neutral", text: <>Server {server} restarted</> }
+    case "server.down":
+      return { icon: ServerCrash, tone: "bad", text: <>Server {server} is down</> }
+    case "server.recovered":
+      return { icon: HeartPulse, tone: "good", text: <>Server {server} is running again</> }
+    case "settings.notifications_changed":
+      return { icon: Mail, tone: "neutral", text: "Email notification settings changed" }
     case "settings.updated":
       return { icon: Settings, tone: "neutral", text: "Panel settings changed" }
     case "settings.domain_changed":

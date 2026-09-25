@@ -12,6 +12,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/geoip"
 	"github.com/kwa0x2/tunploy/internal/httpx"
+	"github.com/kwa0x2/tunploy/internal/notify"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/web"
 )
@@ -28,6 +29,7 @@ type Server struct {
 	deploy        *deploy.Manager
 	geo           *geoip.DB
 	https         HTTPS
+	notifier      *notify.Notifier
 	loginThrottle *auth.Throttle
 	handler       http.Handler
 	lookupHost    func(ctx context.Context, host string) ([]string, error)
@@ -45,11 +47,13 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, geo
 		deploy:        mgr,
 		geo:           geo,
 		https:         https,
+		notifier:      notify.New(),
 		loginThrottle: auth.NewThrottle(loginMaxAttempts, loginWindow),
 		lookupHost:    net.DefaultResolver.LookupHost,
 	}
 	mgr.OnPeerChange(s.peerChanged)
 	mgr.OnPeerBlock(s.peerBlocked)
+	mgr.OnServerHealth(s.serverHealth)
 	s.closing, s.stopStreams = context.WithCancel(context.Background())
 	s.handler = chain(s.routes(), recoverPanics, s.identifyClient, securityHeaders, logRequests)
 	return s
@@ -82,6 +86,9 @@ func (s *Server) routes() http.Handler {
 	private.Handle("GET /api/settings/domain", httpx.Handler(s.handleGetDomain))
 	private.Handle("PUT /api/settings/domain", httpx.Handler(s.handleSetDomain))
 	private.Handle("POST /api/settings/domain/retry", httpx.Handler(s.handleRetryDomain))
+	private.Handle("GET /api/settings/notifications", httpx.Handler(s.handleGetNotifications))
+	private.Handle("PUT /api/settings/notifications", httpx.Handler(s.handleSetNotifications))
+	private.Handle("POST /api/settings/notifications/test", httpx.Handler(s.handleTestNotifications))
 	private.Handle("GET /api/events", httpx.Handler(s.handleListEvents))
 
 	private.Handle("GET /api/instances", httpx.Handler(s.handleListInstances))

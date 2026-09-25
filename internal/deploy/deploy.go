@@ -67,6 +67,16 @@ type Manager struct {
 	blocked     map[int64]map[int64]wg.Block
 	onPeerBlock func(PeerBlock)
 	now         func() time.Time
+
+	// Whether each instance looked down on the last watch; only Watch touches it.
+	down           map[int64]bool
+	onServerHealth func(ServerHealth)
+}
+
+type ServerHealth struct {
+	InstanceID int64
+	Down       bool
+	Reason     string
 }
 
 type PeerBlock struct {
@@ -100,6 +110,7 @@ func New(st *store.Store, dk Docker, dataDir string) (*Manager, error) {
 		activity: activity{peers: map[int64]map[wg.Key]sample{}},
 		blocked:  map[int64]map[int64]wg.Block{},
 		now:      time.Now,
+		down:     map[int64]bool{},
 	}, nil
 }
 
@@ -322,6 +333,9 @@ func (m *Manager) OnPeerChange(fn func(PeerChange)) { m.onPeerChange = fn }
 // OnPeerBlock must be set before Watch starts.
 func (m *Manager) OnPeerBlock(fn func(PeerBlock)) { m.onPeerBlock = fn }
 
+// OnServerHealth must be set before Watch starts.
+func (m *Manager) OnServerHealth(fn func(ServerHealth)) { m.onServerHealth = fn }
+
 // Watch is the only caller of RecordTraffic, which needs a single writer.
 func (m *Manager) Watch(ctx context.Context, every time.Duration) {
 	ticker := time.NewTicker(every)
@@ -346,6 +360,7 @@ func (m *Manager) Watch(ctx context.Context, every time.Duration) {
 }
 
 func (m *Manager) watchInstance(ctx context.Context, in *wg.Instance) error {
+	m.checkHealth(ctx, in.ID)
 	stats, err := m.PeerStats(ctx, in)
 	if err != nil {
 		return err
@@ -354,6 +369,25 @@ func (m *Manager) watchInstance(ctx context.Context, in *wg.Instance) error {
 		return err
 	}
 	return m.enforceLimits(ctx, in.ID)
+}
+
+// A stop from the panel exits cleanly, so only a crash loop or a failed exit counts as down.
+func (m *Manager) checkHealth(ctx context.Context, instanceID int64) {
+	ct, err := m.container(ctx, instanceID)
+	if err != nil {
+		return
+	}
+	var st Status
+	if ct != nil {
+		st = statusOf(*ct)
+	}
+	down := st.State == StateRestarting || (st.State == StateStopped && st.Error != "")
+
+	was, known := m.down[instanceID]
+	m.down[instanceID] = down
+	if known && was != down && m.onServerHealth != nil {
+		m.onServerHealth(ServerHealth{InstanceID: instanceID, Down: down, Reason: st.Error})
+	}
 }
 
 // Limits change with time and traffic alone, so nothing else would notice.

@@ -98,6 +98,12 @@ Leave that terminal open and browse to <http://localhost:3000>.
 
 Under **Settings → Security**, turn on two-factor authentication and scan the QR code with an authenticator app (Google Authenticator, 1Password, Aegis, Bitwarden and so on). From then on, signing in asks for the 6-digit code from the app as well. Turning it on signs out every other device.
 
+## Email notifications
+
+Under **Settings → Email notifications**, give the panel an SMTP account and it emails you when servers go down or come back, devices are added, a device uses up its data, someone fails to sign in, and so on; you choose which. Events that happen close together arrive as one email, and at most 30 emails go out an hour.
+
+Any provider that offers SMTP works. Use the address you send from as the username, port **587** with **STARTTLS** (or **465** with **TLS**), and set **From** to an address the account may send as. Gmail and Outlook need an app password rather than your normal one. **Send test email** tries the form as it is, before you save, and shows the mail server's own answer if it fails.
+
 ## Manage the admin account
 
 These run inside the panel's container and ask for the password without echoing it:

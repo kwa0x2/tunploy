@@ -176,6 +176,35 @@ export interface DomainStatus {
 
 export type SettingsInput = Partial<Pick<Settings, "public_host" | "default_dns">>
 
+export type SMTPSecurity = "starttls" | "tls" | "none"
+
+export type NotificationGroup =
+  | "servers"
+  | "devices"
+  | "limits"
+  | "failed_logins"
+  | "security"
+  | "logins"
+  | "connections"
+
+export interface NotificationSettings {
+  enabled: boolean
+  host: string
+  port: number
+  security: SMTPSecurity
+  username: string
+  password_set: boolean
+  from: string
+  to: string[]
+  events: NotificationGroup[]
+  status: { last_sent_at?: string; last_error?: string; last_error_at?: string }
+}
+
+// Leaving password out keeps the saved one.
+export type NotificationInput = Omit<NotificationSettings, "password_set" | "status"> & {
+  password?: string
+}
+
 export interface PasswordChange {
   current_password: string
   new_password: string
@@ -336,6 +365,14 @@ export const api = {
   setDomain: (input: { domain: string; email: string }) =>
     request<DomainStatus>("/api/settings/domain", { method: "PUT", body: JSON.stringify(input) }),
   retryDomain: () => post<DomainStatus>("/api/settings/domain/retry"),
+  notifications: () => request<NotificationSettings>("/api/settings/notifications"),
+  setNotifications: (input: NotificationInput) =>
+    request<NotificationSettings>("/api/settings/notifications", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  testNotifications: (input: NotificationInput) =>
+    post<void>("/api/settings/notifications/test", input),
   httpsUrl: () => request<{ url?: string }>("/api/https").then((r) => r.url ?? ""),
 
   dockerStatus: () => request<DockerStatus>("/api/system/docker"),

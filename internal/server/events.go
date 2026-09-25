@@ -72,9 +72,13 @@ func (s *Server) record(ctx context.Context, e store.Event) {
 	}
 	slog.Info("event", attrs...)
 
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = time.Now()
+	}
 	if err := s.store.AddEvent(context.WithoutCancel(ctx), e); err != nil {
 		slog.Error("record event", "kind", e.Kind, "error", err)
 	}
+	s.notifier.Notify(e)
 }
 
 func instanceEvent(kind string, in *wg.Instance) store.Event {

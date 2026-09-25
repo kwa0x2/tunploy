@@ -89,6 +89,7 @@ func run() error {
 		go reconcile(ctx, mgr)
 	}
 	go mgr.Watch(ctx, peerWatchInterval)
+	go handler.RunNotifications(ctx)
 	go housekeeping(ctx, st)
 
 	panel := newHTTPServer(cfg.Listen, handler)

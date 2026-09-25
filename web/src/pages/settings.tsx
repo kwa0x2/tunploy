@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FormField } from "@/components/form-field"
 import { DomainCard } from "@/components/domain-card"
+import { NotificationsCard } from "@/components/notifications-card"
 import { PageHeader } from "@/components/page-header"
 import { SecurityCard } from "@/components/security-card"
 import { useResource } from "@/hooks/use-resource"
@@ -28,6 +29,7 @@ export function SettingsPage() {
   const settings = useResource(useCallback(() => api.settings(), []))
   const domain = useResource(useCallback(() => api.domain(), []))
   const httpsUrl = useResource(useCallback(() => api.httpsUrl(), []))
+  const notifications = useResource(useCallback(() => api.notifications(), []))
   const { reload: reloadStatus } = domain
   const { reload: reloadUrl } = httpsUrl
   const reloadDomain = useCallback(() => {
@@ -37,7 +39,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Panel defaults, domain, security and your account." />
+      <PageHeader title="Settings" description="Panel defaults, domain, security, email notifications and your account." />
       <div className="grid max-w-2xl gap-6">
         {settings.data ? (
           <DefaultsCard settings={settings.data} onSaved={() => void settings.reload()} />
@@ -59,6 +61,11 @@ export function SettingsPage() {
           domain.error === undefined && <Skeleton className="h-80 rounded-xl" />
         )}
         <SecurityCard httpsUrl={httpsUrl.data ?? ""} />
+        {notifications.data ? (
+          <NotificationsCard settings={notifications.data} onSaved={() => void notifications.reload()} />
+        ) : (
+          notifications.error === undefined && <Skeleton className="h-96 rounded-xl" />
+        )}
         <AccountCard />
       </div>
     </>
