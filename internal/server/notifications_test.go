@@ -28,7 +28,7 @@ func TestNotificationSettings(t *testing.T) {
 	var got notificationsJSON
 	p.want(p.do("GET", "/api/settings/notifications", nil), http.StatusOK, &got)
 	if got.Enabled || got.Port != 587 || got.Security != "starttls" || len(got.To) != 0 ||
-		strings.Join(got.Events, ",") != "servers,devices,limits,failed_logins,security" {
+		strings.Join(got.Events, ",") != "servers,devices,limits,failed_logins,security,backups" {
 		t.Fatalf("defaults = %+v", got)
 	}
 

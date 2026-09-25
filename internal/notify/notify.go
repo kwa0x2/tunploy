@@ -32,12 +32,14 @@ var Groups = []Group{
 	{ID: "limits", Kinds: []string{"device.limit_reached", "device.expired", "device.unblocked"}},
 	{ID: "failed_logins", Kinds: []string{"auth.login_failed"}},
 	{ID: "security", Kinds: []string{"auth.password_changed", "auth.totp_enabled", "auth.totp_disabled",
-		"settings.domain_changed", "settings.notifications_changed"}},
+		"settings.domain_changed", "settings.notifications_changed", "settings.backups_changed",
+		"backup.downloaded", "backup.restored"}},
+	{ID: "backups", Kinds: []string{"backup.failed"}},
 	{ID: "logins", Kinds: []string{"auth.login"}},
 	{ID: "connections", Kinds: []string{"device.connected", "device.disconnected"}},
 }
 
-var DefaultGroups = []string{"servers", "devices", "limits", "failed_logins", "security"}
+var DefaultGroups = []string{"servers", "devices", "limits", "failed_logins", "security", "backups"}
 
 func ValidGroup(id string) bool {
 	return slices.ContainsFunc(Groups, func(g Group) bool { return g.ID == id })
@@ -286,6 +288,21 @@ func Describe(e store.Event) string {
 		return "Panel domain set"
 	case "settings.notifications_changed":
 		return "Email notification settings changed"
+	case "settings.backups_changed":
+		if e.Detail == "disconnected" {
+			return "Backup bucket disconnected"
+		}
+		return "Backup settings changed"
+	case "backup.created":
+		return "Backup created"
+	case "backup.failed":
+		return "Scheduled backup failed"
+	case "backup.downloaded":
+		return "A backup was downloaded"
+	case "backup.deleted":
+		return "A backup was deleted"
+	case "backup.restored":
+		return "The panel was restored from a backup"
 	case "auth.login":
 		return "Someone signed in to the panel"
 	case "auth.login_failed":

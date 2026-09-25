@@ -283,6 +283,59 @@ func (m *Manager) Remove(ctx context.Context, instanceID int64) error {
 	return nil
 }
 
+// Rebuild replaces every container after the database was swapped out, since
+// the same instance ID may now stand for a different server.
+func (m *Manager) Rebuild(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	instances, err := m.store.Instances(ctx)
+	if err != nil {
+		return err
+	}
+	containers, err := m.docker.ListContainers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, ct := range containers {
+		if _, ok := ct.Labels[LabelInstance]; !ok {
+			continue
+		}
+		if err := m.docker.RemoveContainer(ctx, ct.Name); err != nil && !errors.Is(err, docker.ErrNotFound) {
+			return err
+		}
+	}
+
+	// Only stale directories go: Docker Desktop loses track of a bind mount
+	// whose parent was deleted and made again.
+	known := map[string]bool{}
+	for _, in := range instances {
+		known[strconv.FormatInt(in.ID, 10)] = true
+	}
+	root := filepath.Join(m.dataDir, "wireguard")
+	entries, err := os.ReadDir(root)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("list config dirs: %w", err)
+	}
+	for _, e := range entries {
+		if !known[e.Name()] {
+			if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
+				return fmt.Errorf("remove config dir: %w", err)
+			}
+		}
+	}
+	m.activity.reset()
+	m.blocked = map[int64]map[int64]wg.Block{}
+
+	var errs []error
+	for _, in := range instances {
+		if err := m.deploy(ctx, in.ID, true, nil); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", in.Name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // syncconf applies peer changes without dropping connected peers.
 func (m *Manager) Apply(ctx context.Context, instanceID int64) error {
 	m.mu.Lock()

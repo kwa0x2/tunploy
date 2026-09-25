@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/auth"
+	"github.com/kwa0x2/tunploy/internal/backup"
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/geoip"
@@ -30,6 +31,7 @@ type Server struct {
 	geo           *geoip.DB
 	https         HTTPS
 	notifier      *notify.Notifier
+	backups       *backup.Service
 	loginThrottle *auth.Throttle
 	handler       http.Handler
 	lookupHost    func(ctx context.Context, host string) ([]string, error)
@@ -38,8 +40,8 @@ type Server struct {
 	stopStreams context.CancelFunc
 }
 
-// Call New before mgr.Watch: it hooks into peer changes.
-func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, geo *geoip.DB, https HTTPS) *Server {
+// Call New before mgr.Watch and bk.Run: it hooks into their events.
+func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, bk *backup.Service, geo *geoip.DB, https HTTPS) *Server {
 	s := &Server{
 		cfg:           cfg,
 		store:         st,
@@ -48,12 +50,14 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, geo
 		geo:           geo,
 		https:         https,
 		notifier:      notify.New(),
+		backups:       bk,
 		loginThrottle: auth.NewThrottle(loginMaxAttempts, loginWindow),
 		lookupHost:    net.DefaultResolver.LookupHost,
 	}
 	mgr.OnPeerChange(s.peerChanged)
 	mgr.OnPeerBlock(s.peerBlocked)
 	mgr.OnServerHealth(s.serverHealth)
+	bk.OnEvent(s.record)
 	s.closing, s.stopStreams = context.WithCancel(context.Background())
 	s.handler = chain(s.routes(), recoverPanics, s.identifyClient, securityHeaders, logRequests)
 	return s
@@ -89,7 +93,20 @@ func (s *Server) routes() http.Handler {
 	private.Handle("GET /api/settings/notifications", httpx.Handler(s.handleGetNotifications))
 	private.Handle("PUT /api/settings/notifications", httpx.Handler(s.handleSetNotifications))
 	private.Handle("POST /api/settings/notifications/test", httpx.Handler(s.handleTestNotifications))
+	private.Handle("GET /api/settings/backups", httpx.Handler(s.handleGetBackupSettings))
+	private.Handle("PUT /api/settings/backups", httpx.Handler(s.handleSetBackupSettings))
+	private.Handle("DELETE /api/settings/backups", httpx.Handler(s.handleDeleteBackupSettings))
+	private.Handle("POST /api/settings/backups/test", httpx.Handler(s.handleTestBackupSettings))
+	private.Handle("PUT /api/settings/backups/encryption", httpx.Handler(s.handleSetBackupEncryption))
 	private.Handle("GET /api/events", httpx.Handler(s.handleListEvents))
+
+	private.Handle("GET /api/backups", httpx.Handler(s.handleListBackups))
+	private.Handle("POST /api/backups", httpx.Handler(s.handleCreateBackup))
+	private.Handle("GET /api/backups/export", httpx.Handler(s.handleExportBackup))
+	private.Handle("POST /api/backups/import", httpx.Handler(s.handleImportBackup))
+	private.Handle("GET /api/backups/{name}", httpx.Handler(s.handleDownloadBackup))
+	private.Handle("DELETE /api/backups/{name}", httpx.Handler(s.handleDeleteBackup))
+	private.Handle("POST /api/backups/{name}/restore", httpx.Handler(s.handleRestoreRemote))
 
 	private.Handle("GET /api/instances", httpx.Handler(s.handleListInstances))
 	private.Handle("POST /api/instances", httpx.Handler(s.handleCreateInstance))

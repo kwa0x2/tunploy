@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kwa0x2/tunploy/internal/backup"
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker/dockertest"
@@ -44,7 +45,8 @@ func newTestServerWithDeploy(t *testing.T, dk Docker, fk *dockertest.Fake) (*Ser
 		t.Fatalf("new deploy manager: %v", err)
 	}
 	cfg := config.Config{SessionTTL: time.Hour, PublicHost: "vpn.example.com"}
-	s := New(cfg, st, dk, mgr, nil, &fakeHTTPS{status: tlscert.Status{Enabled: true, State: tlscert.StateOff}})
+	bk := backup.NewService(st, t.TempDir(), "test")
+	s := New(cfg, st, dk, mgr, bk, nil, &fakeHTTPS{status: tlscert.Status{Enabled: true, State: tlscert.StateOff}})
 	s.lookupHost = func(ctx context.Context, host string) ([]string, error) {
 		if strings.HasSuffix(host, ".invalid") {
 			return nil, errors.New("no such host")

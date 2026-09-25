@@ -2,7 +2,11 @@ import { useCallback, useState } from "react"
 import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import {
+  ArchiveRestore,
   CalendarX,
+  CloudUpload,
+  DatabaseBackup,
+  Download,
   Gauge,
   Globe,
   HeartPulse,
@@ -203,6 +207,22 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: HeartPulse, tone: "good", text: <>Server {server} is running again</> }
     case "settings.notifications_changed":
       return { icon: Mail, tone: "neutral", text: "Email notification settings changed" }
+    case "settings.backups_changed":
+      return {
+        icon: DatabaseBackup,
+        tone: "neutral",
+        text: e.detail === "disconnected" ? "Backup bucket disconnected" : "Backup settings changed",
+      }
+    case "backup.created":
+      return { icon: CloudUpload, tone: "good", text: "Backup created" }
+    case "backup.failed":
+      return { icon: TriangleAlert, tone: "bad", text: "Scheduled backup failed" }
+    case "backup.downloaded":
+      return { icon: Download, tone: "neutral", text: "Backup downloaded" }
+    case "backup.deleted":
+      return { icon: Trash2, tone: "neutral", text: "Backup deleted" }
+    case "backup.restored":
+      return { icon: ArchiveRestore, tone: "neutral", text: "Panel restored from a backup" }
     case "settings.updated":
       return { icon: Settings, tone: "neutral", text: "Panel settings changed" }
     case "settings.domain_changed":

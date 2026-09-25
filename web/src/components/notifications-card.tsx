@@ -31,7 +31,8 @@ const groups: { id: NotificationGroup; label: string; hint: string }[] = [
   { id: "devices", label: "Devices", hint: "Added, removed, enabled or disabled." },
   { id: "limits", label: "Data limits and access", hint: "A device used up its data, its access ended, or it may connect again." },
   { id: "failed_logins", label: "Failed sign-ins", hint: "Someone tried a wrong password or code." },
-  { id: "security", label: "Security changes", hint: "Password, two-factor, panel domain or these email settings changed." },
+  { id: "security", label: "Security changes", hint: "Password, two-factor, domain, email or backup settings changed, or a backup was downloaded or restored." },
+  { id: "backups", label: "Backup failures", hint: "A scheduled backup to S3 could not be made." },
   { id: "logins", label: "Successful sign-ins", hint: "Every time someone signs in to the panel." },
   { id: "connections", label: "Connections", hint: "Each time a device connects or disconnects. Can be many emails a day." },
 ]
@@ -159,7 +160,7 @@ export function NotificationsCard({ settings, onSaved }: {
                     size="sm"
                     role="radio"
                     aria-checked={form.security === s.value}
-                    variant={form.security === s.value ? "secondary" : "outline"}
+                    variant={form.security === s.value ? "default" : "outline"}
                     onClick={() => chooseSecurity(s.value)}
                   >
                     {s.label}

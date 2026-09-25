@@ -98,3 +98,9 @@ func (a *activity) forget(instanceID int64) {
 	defer a.mu.Unlock()
 	delete(a.peers, instanceID)
 }
+
+func (a *activity) reset() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.peers = map[int64]map[wg.Key]sample{}
+}

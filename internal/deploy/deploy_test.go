@@ -294,3 +294,38 @@ func TestProvisionFailsWhenBootFails(t *testing.T) {
 		t.Errorf("log = %q, want %q", boot.Log, want)
 	}
 }
+
+func TestRebuildReplacesEveryContainer(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	home := f.instance(t, "Home", 51820)
+	lab := f.instance(t, "Lab", 51821)
+	for _, in := range []*wg.Instance{home, lab} {
+		if err := f.m.Deploy(ctx, in.ID, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := f.docker.Container(ContainerName(home.ID))
+
+	// As after a restore: Lab is gone from the database, Home is still there.
+	if err := f.store.DeleteInstance(ctx, lab.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.m.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	after, ok := f.docker.Container(ContainerName(home.ID))
+	if !ok || after.ID == before.ID || after.State != "running" {
+		t.Fatalf("home after rebuild = %+v (before %s)", after, before.ID)
+	}
+	if f.state(t, lab.ID) != "missing" {
+		t.Fatal("lab's container survived the rebuild")
+	}
+	if _, err := os.Stat(f.m.ConfigDir(lab.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lab's config dir survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.m.ConfigDir(home.ID), "wg0.conf")); err != nil {
+		t.Fatalf("home's config: %v", err)
+	}
+}

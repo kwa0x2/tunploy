@@ -38,11 +38,19 @@ func (s *Server) RestoreDomain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	domain := stored[settingPanelDomain]
-	if domain == "" || !s.https.Status().Enabled {
-		return nil
+	s.applyDomain(ctx, stored)
+	return nil
+}
+
+func (s *Server) applyDomain(ctx context.Context, stored map[string]string) {
+	if !s.https.Status().Enabled {
+		return
 	}
+	domain := stored[settingPanelDomain]
 	s.https.Configure(domain, stored[settingACMEEmail])
+	if domain == "" {
+		return
+	}
 	go func() {
 		st, err := s.https.Obtain(ctx)
 		if err == nil && st.State == tlscert.StateFailed {
@@ -55,7 +63,6 @@ func (s *Server) RestoreDomain(ctx context.Context) error {
 		}
 		slog.Info("https certificate ready", "domain", domain)
 	}()
-	return nil
 }
 
 func (s *Server) handleGetDomain(w http.ResponseWriter, r *http.Request) error {

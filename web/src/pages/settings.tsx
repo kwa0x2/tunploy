@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FormField } from "@/components/form-field"
+import { BackupStorageCard, BackupsCard } from "@/components/backups-card"
 import { DomainCard } from "@/components/domain-card"
 import { NotificationsCard } from "@/components/notifications-card"
 import { PageHeader } from "@/components/page-header"
@@ -30,6 +31,7 @@ export function SettingsPage() {
   const domain = useResource(useCallback(() => api.domain(), []))
   const httpsUrl = useResource(useCallback(() => api.httpsUrl(), []))
   const notifications = useResource(useCallback(() => api.notifications(), []))
+  const backups = useResource(useCallback(() => api.backupSettings(), []))
   const { reload: reloadStatus } = domain
   const { reload: reloadUrl } = httpsUrl
   const reloadDomain = useCallback(() => {
@@ -39,7 +41,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Panel defaults, domain, security, email notifications and your account." />
+      <PageHeader title="Settings" description="Panel defaults, domain, security, email notifications, backups and your account." />
       <div className="grid max-w-2xl gap-6">
         {settings.data ? (
           <DefaultsCard settings={settings.data} onSaved={() => void settings.reload()} />
@@ -65,6 +67,22 @@ export function SettingsPage() {
           <NotificationsCard settings={notifications.data} onSaved={() => void notifications.reload()} />
         ) : (
           notifications.error === undefined && <Skeleton className="h-96 rounded-xl" />
+        )}
+        {backups.data ? (
+          <>
+            <BackupsCard
+              key={[backups.data.endpoint, backups.data.bucket, backups.data.prefix].join("|")}
+              settings={backups.data}
+              onChange={() => void backups.reload()}
+            />
+            <BackupStorageCard
+              key={String(backups.data.connected)}
+              settings={backups.data}
+              onSaved={() => void backups.reload()}
+            />
+          </>
+        ) : (
+          backups.error === undefined && <Skeleton className="h-96 rounded-xl" />
         )}
         <AccountCard />
       </div>

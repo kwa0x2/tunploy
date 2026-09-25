@@ -15,6 +15,7 @@ import (
 	"time"
 	_ "time/tzdata" // TZ works even in an image without a zoneinfo directory
 
+	"github.com/kwa0x2/tunploy/internal/backup"
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
@@ -33,8 +34,13 @@ const (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "admin" {
-		os.Exit(runAdmin(os.Args[2:]))
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "admin":
+			os.Exit(runAdmin(os.Args[2:]))
+		case "backup":
+			os.Exit(runBackup(os.Args[2:]))
+		}
 	}
 	if err := run(); err != nil {
 		slog.Error("tunploy stopped", "error", err)
@@ -83,13 +89,15 @@ func run() error {
 	if cfg.HTTPSListen == "" {
 		certs.Disable("HTTPS is turned off with TUNPLOY_HTTPS=false")
 	}
-	handler := server.New(cfg, st, dk, mgr, geo, certs)
+	backups := backup.NewService(st, cfg.DataDir, version)
+	handler := server.New(cfg, st, dk, mgr, backups, geo, certs)
 
 	if logDockerStatus(ctx, dk) {
-		go reconcile(ctx, mgr)
+		go reconcile(ctx, mgr, cfg.DataDir)
 	}
 	go mgr.Watch(ctx, peerWatchInterval)
 	go handler.RunNotifications(ctx)
+	go handler.RunBackups(ctx)
 	go housekeeping(ctx, st)
 
 	panel := newHTTPServer(cfg.Listen, handler)
@@ -179,7 +187,21 @@ func logDockerStatus(ctx context.Context, dk *docker.Client) bool {
 	return true
 }
 
-func reconcile(ctx context.Context, mgr *deploy.Manager) {
+// After a restore from the command line the same container name may belong to
+// a different server, so every container is replaced instead.
+func reconcile(ctx context.Context, mgr *deploy.Manager, dataDir string) {
+	if backup.RebuildPending(dataDir) {
+		slog.Info("rebuilding wireguard containers after a restore")
+		if err := mgr.Rebuild(ctx); err != nil {
+			slog.Error("rebuild wireguard containers; restart the panel to try again", "error", err)
+			return
+		}
+		if err := backup.ClearRebuild(dataDir); err != nil {
+			slog.Error("clear rebuild request", "error", err)
+		}
+		slog.Info("wireguard containers rebuilt")
+		return
+	}
 	if err := mgr.Reconcile(ctx); err != nil {
 		slog.Error("reconcile wireguard containers", "error", err)
 		return
