@@ -20,6 +20,7 @@ import { DomainCard } from "@/components/domain-card"
 import { NotificationsCard } from "@/components/notifications-card"
 import { PageHeader } from "@/components/page-header"
 import { SecurityCard } from "@/components/security-card"
+import { UpdatesCard } from "@/components/updates-card"
 import { useResource } from "@/hooks/use-resource"
 import { ApiError, api } from "@/lib/api"
 import type { Settings } from "@/lib/api"
@@ -41,7 +42,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Panel defaults, domain, security, email notifications, backups and your account." />
+      <PageHeader title="Settings" description="Panel defaults, domain, security, email notifications, backups, updates and your account." />
       <div className="grid max-w-2xl gap-6">
         {settings.data ? (
           <DefaultsCard settings={settings.data} onSaved={() => void settings.reload()} />
@@ -84,6 +85,7 @@ export function SettingsPage() {
         ) : (
           backups.error === undefined && <Skeleton className="h-96 rounded-xl" />
         )}
+        <UpdatesCard />
         <AccountCard />
       </div>
     </>

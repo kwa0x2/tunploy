@@ -26,7 +26,7 @@ The script:
 
 The panel has no sign-up page. The admin account can only be created on the server, so nobody who stumbles on the panel can claim it.
 
-To upgrade later, run the same command again. It pulls the newest image and replaces the container; your servers, peers and account stay in `/var/lib/tunploy`, and it does not ask for an account again. The port, bind address and trusted proxies you chose before are kept; the panel domain lives in the database, so it is kept too.
+To upgrade later, use **Update now** in the panel (see [Updating](#updating)), or run the same command again. It pulls the newest image and replaces the container; your servers, peers and account stay in `/var/lib/tunploy`, and it does not ask for an account again. The port, bind address and trusted proxies you chose before are kept; the panel domain lives in the database, so it is kept too.
 
 ### Options
 
@@ -43,11 +43,37 @@ curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh \
 | `TUNPLOY_HTTPS` | `true` | `false` leaves TCP 80 and 443 alone, for a server whose web server needs them. The panel then can't serve its own domain. |
 | `TUNPLOY_TRUSTED_PROXIES` | none | Your reverse proxy's addresses. See [behind your own reverse proxy](#behind-your-own-reverse-proxy). |
 | `TUNPLOY_TIMEZONE` | the server's time zone | Where days and months begin for data usage and monthly limits, for example `Europe/Istanbul`. |
+| `TUNPLOY_UPDATE_CHECK` | `true` | `false` stops the panel from checking GitHub for new releases on its own. |
 | `TUNPLOY_BIND` | `0.0.0.0` | Address the panel port listens on. `127.0.0.1` keeps it reachable only over an SSH tunnel. |
 | `TUNPLOY_PORT` | `3000` | Panel port. |
 | `TUNPLOY_VERSION` | `latest` | Image tag, for example `0.1.0` or `edge`. |
 | `TUNPLOY_IMAGE` | `ghcr.io/kwa0x2/tunploy` | Image to install, for forks and mirrors. |
 | `TUNPLOY_ADMIN_NAME`, `TUNPLOY_ADMIN_EMAIL`, `TUNPLOY_ADMIN_PASSWORD` | asked | Create the admin account without prompting, for automated installs. |
+
+## Updating
+
+The panel checks GitHub for a new Tunploy release twice a day. When there is one, an **Update to x.y.z** button appears at the top of every page, and **Settings → Updates** shows the version you run, the latest release with a link to its notes, and a **Check now** button.
+
+**Update now** downloads the new image and restarts the panel on it, which takes about a minute:
+
+1. The panel pulls the new image, so a failed download changes nothing.
+2. It starts a short-lived `tunploy-updater` container from the new image, because a container can't replace itself.
+3. The updater stops the panel, copies the database aside, and starts a new panel container with the same ports, volumes and settings.
+4. Once the new panel answers, the updater removes the old container and the copy of the database. If it doesn't answer within 90 seconds, the updater removes it, puts the database back, and starts the old panel again. **Settings → Updates** then shows why.
+
+VPN servers run in their own containers and keep running throughout, so connected devices stay connected. You stay signed in. The activity log records every update and every failed one.
+
+The button only works for a panel started by the install script. A panel started with Docker Compose shows how to update it (`docker compose pull && docker compose up -d`) instead. Running the install command again also updates. Set `TUNPLOY_UPDATE_CHECK=false` to stop the panel from contacting GitHub on its own; **Check now** still asks when you press it.
+
+## Uninstall
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh | sudo sh -s uninstall
+```
+
+This removes the panel container, every VPN server it runs, and their images. Connected devices lose their connection. It asks before deleting `/var/lib/tunploy`, which holds every server, device key, backup and the admin account. Keep that directory and a later install picks everything up again. Docker itself stays installed.
+
+Add `--purge` to delete `/var/lib/tunploy` without asking, and `--yes` to skip the confirmation when there is no terminal: `sudo sh -s uninstall --yes --purge`.
 
 ## Sign in
 
@@ -222,6 +248,7 @@ docker exec -it tunploy tunploy admin create
 | `TUNPLOY_ACME_DIRECTORY` | Let's Encrypt | ACME directory URL, for example the Let's Encrypt staging server while testing. |
 | `TUNPLOY_TRUSTED_PROXIES` | empty | Reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed. |
 | `TUNPLOY_SECURE_COOKIES` | `false` | Force `Secure` cookies. Not needed with a panel domain or a trusted proxy that sends `X-Forwarded-Proto`. |
+| `TUNPLOY_UPDATE_CHECK` | `true` | Check GitHub for new releases twice a day. `false` checks only when you press **Check now**. |
 | `TUNPLOY_GEOIP` | `true` | Show device countries. Downloads the free [DB-IP Lite](https://db-ip.com) database (about 8 MB) into the data dir and refreshes it monthly. Set to `false` to never contact db-ip.com. |
 | `TUNPLOY_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 | `TZ` | `UTC` | Time zone for daily and monthly data usage, so monthly limits reset at your midnight, for example `Europe/Istanbul`. |

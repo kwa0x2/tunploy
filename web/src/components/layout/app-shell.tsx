@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
-import { History, LayoutDashboard, LogOut, Menu, Server, Settings, Users } from "lucide-react"
+import { ArrowUpCircle, History, LayoutDashboard, LogOut, Menu, Server, Settings, Users } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,6 +16,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { Logo } from "@/components/logo"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useAuth } from "@/lib/auth"
+import { UpdateProvider, useUpdate } from "@/lib/update"
 import { cn } from "@/lib/utils"
 
 const navigation = [
@@ -53,6 +54,31 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppShell() {
+  return (
+    <UpdateProvider>
+      <Shell />
+    </UpdateProvider>
+  )
+}
+
+function UpdateButton() {
+  const { status, startUpdate } = useUpdate()
+  const navigate = useNavigate()
+  if (!status?.available || !status.latest || status.updating) return null
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="border-emerald-500/40 text-emerald-700 hover:text-emerald-700 dark:text-emerald-400"
+      onClick={() => (status.unsupported ? navigate("/settings#updates") : startUpdate())}
+    >
+      <ArrowUpCircle />
+      <span className="hidden sm:inline">Update to</span> {status.latest.version}
+    </Button>
+  )
+}
+
+function Shell() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -95,6 +121,7 @@ export function AppShell() {
             <Logo />
           </div>
           <div className="ml-auto flex items-center gap-1">
+            <UpdateButton />
             <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger

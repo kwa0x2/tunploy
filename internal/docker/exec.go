@@ -14,7 +14,10 @@ func (c *Client) Exec(ctx context.Context, id string, cmd []string) ([]byte, err
 	if err := c.ensureManaged(ctx, id); err != nil {
 		return nil, err
 	}
+	return c.exec(ctx, id, cmd)
+}
 
+func (c *Client) exec(ctx context.Context, id string, cmd []string) ([]byte, error) {
 	created, err := c.api.ExecCreate(ctx, id, client.ExecCreateOptions{
 		Cmd:          cmd,
 		AttachStdout: true,

@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import {
   ArchiveRestore,
+  ArrowUpCircle,
   CalendarX,
   CloudUpload,
   DatabaseBackup,
@@ -223,6 +224,10 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: Trash2, tone: "neutral", text: "Backup deleted" }
     case "backup.restored":
       return { icon: ArchiveRestore, tone: "neutral", text: "Panel restored from a backup" }
+    case "panel.updated":
+      return { icon: ArrowUpCircle, tone: "good", text: <>Tunploy updated to {e.detail}</> }
+    case "panel.update_failed":
+      return { icon: TriangleAlert, tone: "bad", text: <>Updating Tunploy to {e.detail} failed</> }
     case "settings.updated":
       return { icon: Settings, tone: "neutral", text: "Panel settings changed" }
     case "settings.domain_changed":

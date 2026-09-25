@@ -14,6 +14,10 @@ func (c *Client) Logs(ctx context.Context, id string, tail int, follow bool) (io
 	if err := c.ensureManaged(ctx, id); err != nil {
 		return nil, err
 	}
+	return c.logs(ctx, id, tail, follow)
+}
+
+func (c *Client) logs(ctx context.Context, id string, tail int, follow bool) (io.ReadCloser, error) {
 	raw, err := c.api.ContainerLogs(ctx, id, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,

@@ -20,6 +20,7 @@ type Config struct {
 	SessionTTL    time.Duration
 	SecureCookies bool
 	GeoIP         bool
+	UpdateCheck   bool
 	LogLevel      slog.Level
 
 	// HTTPSListen is empty when HTTPS is off; the domain itself is set in the panel.
@@ -40,6 +41,7 @@ func Load() (Config, error) {
 		SessionTTL:    7 * 24 * time.Hour,
 		SecureCookies: false,
 		GeoIP:         true,
+		UpdateCheck:   true,
 		HTTPSListen:   env("TUNPLOY_HTTPS_LISTEN", ":443"),
 		HTTPListen:    env("TUNPLOY_HTTP_LISTEN", ":80"),
 		ACMEDirectory: env("TUNPLOY_ACME_DIRECTORY", ""),
@@ -70,6 +72,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("TUNPLOY_GEOIP: %w", err)
 		}
 		cfg.GeoIP = b
+	}
+
+	if raw := env("TUNPLOY_UPDATE_CHECK", ""); raw != "" {
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("TUNPLOY_UPDATE_CHECK: %w", err)
+		}
+		cfg.UpdateCheck = b
 	}
 
 	if raw := env("TUNPLOY_HTTPS", ""); raw != "" {

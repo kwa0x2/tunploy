@@ -5,6 +5,13 @@
 #
 # Running it again upgrades to the newest image; data in /var/lib/tunploy is kept.
 #
+# To remove Tunploy and every VPN server it runs:
+#
+#   curl -fsSL https://raw.githubusercontent.com/kwa0x2/tunploy/main/install.sh | sudo sh -s uninstall
+#
+# It asks before deleting /var/lib/tunploy; --purge deletes it without asking,
+# and --yes skips the confirmation, for a run without a terminal.
+#
 # Optional environment, passed after sudo so it survives it
 # (curl ... | sudo TUNPLOY_PORT=8080 sh):
 #   TUNPLOY_IMAGE        image to install (default: ghcr.io/kwa0x2/tunploy)
@@ -17,6 +24,7 @@
 #                        can't serve its own HTTPS domain (default: true)
 #   TUNPLOY_TRUSTED_PROXIES
 #                        CIDRs of your own reverse proxy, whose X-Forwarded-For is believed
+#   TUNPLOY_UPDATE_CHECK false stops the panel from checking GitHub for new releases
 #   TUNPLOY_TIMEZONE     time zone for daily and monthly data usage, e.g. Europe/Istanbul
 #                        (default: this server's time zone)
 #   TUNPLOY_ADMIN_NAME, TUNPLOY_ADMIN_EMAIL, TUNPLOY_ADMIN_PASSWORD
@@ -82,6 +90,7 @@ choose_settings() {
 	TRUSTED_PROXIES=${TUNPLOY_TRUSTED_PROXIES:-$(current_env TUNPLOY_TRUSTED_PROXIES)}
 	TIMEZONE=${TUNPLOY_TIMEZONE:-$(current_env TZ)}
 	TIMEZONE=${TIMEZONE:-$(host_timezone)}
+	UPDATE_CHECK=${TUNPLOY_UPDATE_CHECK:-$(current_env TUNPLOY_UPDATE_CHECK)}
 	HTTPS=${TUNPLOY_HTTPS:-$(current_env TUNPLOY_HTTPS)}
 	HTTPS=${HTTPS:-true}
 
@@ -135,6 +144,9 @@ install_panel() {
 	set -- "$@" -p "$BIND:$PORT:3000" -e TZ="$TIMEZONE"
 	if [ -n "$TRUSTED_PROXIES" ]; then
 		set -- "$@" -e TUNPLOY_TRUSTED_PROXIES="$TRUSTED_PROXIES"
+	fi
+	if [ -n "$UPDATE_CHECK" ]; then
+		set -- "$@" -e TUNPLOY_UPDATE_CHECK="$UPDATE_CHECK"
 	fi
 	if [ "$HTTPS" = false ]; then
 		HTTPS_PORTS=
@@ -298,10 +310,108 @@ print_summary() {
 	echo
 }
 
-main() {
-	# A Ctrl-C during the password prompt must not leave the terminal mute.
-	trap 'stty echo 2>/dev/null </dev/tty || true' EXIT
-	trap 'exit 130' INT TERM
+# Asks a yes/no question on the terminal; no is the default.
+confirm() {
+	printf '%s [y/N] ' "$1" >/dev/tty
+	IFS= read -r reply </dev/tty || reply=
+	case "$reply" in
+	[yY] | [yY][eE][sS]) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+uninstall() {
+	purge=
+	yes=
+	for arg in "$@"; do
+		case "$arg" in
+		--purge) purge=yes ;;
+		--yes | -y) yes=yes ;;
+		*) fail "unknown option $arg for uninstall; use --purge or --yes" ;;
+		esac
+	done
+	[ "$(id -u)" -eq 0 ] || fail "run this as root, e.g. curl -fsSL <url> | sudo sh -s uninstall"
+
+	tty=
+	(: </dev/tty) 2>/dev/null && tty=yes
+	if [ -z "$yes" ]; then
+		[ -n "$tty" ] || fail "no terminal to confirm on; run again with: sh -s uninstall --yes"
+		echo
+		echo "  This removes the Tunploy panel and every VPN server it runs;"
+		echo "  connected devices lose their connection."
+		echo
+		confirm "Uninstall Tunploy?" || fail "nothing was removed"
+	fi
+
+	if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+		remove_containers
+	else
+		warn "Docker is not running, so no containers were removed"
+	fi
+
+	if [ -d "$DATA_DIR" ]; then
+		if [ -z "$purge" ] && [ -z "$yes" ] &&
+			confirm "Also delete $DATA_DIR, with every server, device key, backup and the admin account?"; then
+			purge=yes
+		fi
+		if [ -n "$purge" ]; then
+			info "Deleting $DATA_DIR"
+			rm -rf "$DATA_DIR"
+		fi
+	fi
+
+	echo
+	info "Tunploy is uninstalled"
+	echo
+	if [ -d "$DATA_DIR" ]; then
+		echo "  Your data is still in $DATA_DIR; installing again picks it up."
+		echo "  To delete it: sudo rm -rf $DATA_DIR"
+	fi
+	echo "  Docker itself is still installed, since other programs may use it."
+	echo
+}
+
+remove_containers() {
+	# Read before the container goes: an install from a fork or a mirror
+	# pulled a different image.
+	images=$(docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null || true)
+	images=${images%@*}
+	case "${images##*/}" in *:*) images=${images%:*} ;; esac
+	images="$images $IMAGE"
+
+	# The updater and the container it swaps out exist only mid-update.
+	for name in "$CONTAINER-updater" "$CONTAINER-previous" "$CONTAINER"; do
+		if docker inspect "$name" >/dev/null 2>&1; then
+			info "Removing the $name container"
+			docker rm -f "$name" >/dev/null
+		fi
+	done
+
+	servers=$(docker ps -aq --filter label=io.tunploy.managed=true)
+	if [ -n "$servers" ]; then
+		info "Removing the VPN servers"
+		# shellcheck disable=SC2086
+		docker rm -f $servers >/dev/null
+	fi
+
+	info "Removing Tunploy's images"
+	# The panel's by name, so an image that is also tagged otherwise stays.
+	refs=$(
+		{
+			docker images -q --filter label=io.tunploy.managed=true
+			for repo in $images; do
+				docker images --format '{{.Repository}}:{{.Tag}}' "$repo" | grep -v ':<none>$' || true
+			done
+		} | sort -u
+	)
+	if [ -n "$refs" ]; then
+		# shellcheck disable=SC2086
+		docker rmi -f $refs >/dev/null 2>&1 || warn "some images are still in use and were kept"
+	fi
+}
+
+install_or_upgrade() {
+	[ $# -eq 0 ] || fail "unknown argument $1; the commands are install and uninstall"
 	check_system
 	ensure_docker
 	check_wireguard
@@ -311,6 +421,23 @@ main() {
 	wait_until_healthy
 	ensure_admin
 	print_summary "$PUBLIC_HOST"
+}
+
+main() {
+	# A Ctrl-C during a prompt must not leave the terminal mute.
+	trap 'stty echo 2>/dev/null </dev/tty || true' EXIT
+	trap 'exit 130' INT TERM
+	case "${1:-install}" in
+	install)
+		[ $# -eq 0 ] || shift
+		install_or_upgrade "$@"
+		;;
+	uninstall)
+		shift
+		uninstall "$@"
+		;;
+	*) fail "unknown command $1; the commands are install and uninstall" ;;
+	esac
 }
 
 main "$@"

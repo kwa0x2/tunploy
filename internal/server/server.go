@@ -15,6 +15,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/notify"
 	"github.com/kwa0x2/tunploy/internal/store"
+	"github.com/kwa0x2/tunploy/internal/update"
 	"github.com/kwa0x2/tunploy/internal/web"
 )
 
@@ -32,6 +33,7 @@ type Server struct {
 	https         HTTPS
 	notifier      *notify.Notifier
 	backups       *backup.Service
+	updates       *update.Service
 	loginThrottle *auth.Throttle
 	handler       http.Handler
 	lookupHost    func(ctx context.Context, host string) ([]string, error)
@@ -40,8 +42,8 @@ type Server struct {
 	stopStreams context.CancelFunc
 }
 
-// Call New before mgr.Watch and bk.Run: it hooks into their events.
-func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, bk *backup.Service, geo *geoip.DB, https HTTPS) *Server {
+// Call New before mgr.Watch, bk.Run and up.Run: it hooks into their events.
+func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, bk *backup.Service, up *update.Service, geo *geoip.DB, https HTTPS) *Server {
 	s := &Server{
 		cfg:           cfg,
 		store:         st,
@@ -51,6 +53,7 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, bk 
 		https:         https,
 		notifier:      notify.New(),
 		backups:       bk,
+		updates:       up,
 		loginThrottle: auth.NewThrottle(loginMaxAttempts, loginWindow),
 		lookupHost:    net.DefaultResolver.LookupHost,
 	}
@@ -58,6 +61,7 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, bk 
 	mgr.OnPeerBlock(s.peerBlocked)
 	mgr.OnServerHealth(s.serverHealth)
 	bk.OnEvent(s.record)
+	up.OnEvent(s.record)
 	s.closing, s.stopStreams = context.WithCancel(context.Background())
 	s.handler = chain(s.routes(), recoverPanics, s.identifyClient, securityHeaders, logRequests)
 	return s
@@ -85,6 +89,9 @@ func (s *Server) routes() http.Handler {
 	private.Handle("POST /api/auth/totp/enable", httpx.Handler(s.handleTOTPEnable))
 	private.Handle("POST /api/auth/totp/disable", httpx.Handler(s.handleTOTPDisable))
 	private.Handle("GET /api/system/docker", httpx.Handler(s.handleDockerStatus))
+	private.Handle("GET /api/system/update", httpx.Handler(s.handleUpdateStatus))
+	private.Handle("POST /api/system/update", httpx.Handler(s.handleStartUpdate))
+	private.Handle("POST /api/system/update/check", httpx.Handler(s.handleCheckUpdate))
 	private.Handle("GET /api/settings", httpx.Handler(s.handleGetSettings))
 	private.Handle("PATCH /api/settings", httpx.Handler(s.handleUpdateSettings))
 	private.Handle("GET /api/settings/domain", httpx.Handler(s.handleGetDomain))

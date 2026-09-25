@@ -23,6 +23,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/tlscert"
+	"github.com/kwa0x2/tunploy/internal/update"
 )
 
 // version is stamped at build time with -ldflags.
@@ -40,6 +41,10 @@ func main() {
 			os.Exit(runAdmin(os.Args[2:]))
 		case "backup":
 			os.Exit(runBackup(os.Args[2:]))
+		case "self-update":
+			os.Exit(runSelfUpdate(os.Args[2:]))
+		case "health":
+			os.Exit(runHealth())
 		}
 	}
 	if err := run(); err != nil {
@@ -90,7 +95,9 @@ func run() error {
 		certs.Disable("HTTPS is turned off with TUNPLOY_HTTPS=false")
 	}
 	backups := backup.NewService(st, cfg.DataDir, version)
-	handler := server.New(cfg, st, dk, mgr, backups, geo, certs)
+	updates := update.New(version, cfg.DataDir, dk, cfg.UpdateCheck)
+	handler := server.New(cfg, st, dk, mgr, backups, updates, geo, certs)
+	updates.ReportLast(ctx)
 
 	if logDockerStatus(ctx, dk) {
 		go reconcile(ctx, mgr, cfg.DataDir)
@@ -98,6 +105,7 @@ func run() error {
 	go mgr.Watch(ctx, peerWatchInterval)
 	go handler.RunNotifications(ctx)
 	go handler.RunBackups(ctx)
+	go updates.Run(ctx)
 	go housekeeping(ctx, st)
 
 	panel := newHTTPServer(cfg.Listen, handler)
