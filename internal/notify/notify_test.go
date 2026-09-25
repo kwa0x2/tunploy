@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net/mail"
 	"strings"
@@ -46,6 +47,49 @@ func TestSend(t *testing.T) {
 	body, _ := io.ReadAll(quotedprintable.NewReader(msg.Body))
 	if !strings.Contains(string(body), "line two with ünicode") || !strings.Contains(string(body), strings.Repeat("x", 120)) {
 		t.Errorf("body = %q", body)
+	}
+}
+
+func TestSendHTMLKeepsPlainText(t *testing.T) {
+	srv := notifytest.New(t)
+	c := SMTP{Host: srv.Host, Port: srv.Port, Security: SecurityNone, From: "alerts@example.com"}
+	m := compose([]store.Event{{Kind: "server.down", InstanceID: 3, InstanceName: "Home <1>", Detail: "exited with code 1"}},
+		[]string{"me@example.com"}, "https://vpn.example.com/")
+	if err := c.Send(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := mail.ReadMessage(strings.NewReader(srv.Mails()[0].Data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if err != nil || kind != "multipart/alternative" {
+		t.Fatalf("content type = %q (%v)", kind, err)
+	}
+	parts := map[string]string{}
+	r := multipart.NewReader(msg.Body, params["boundary"])
+	for {
+		p, err := r.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(p) // multipart decodes quoted-printable itself
+		kind, _, _ := mime.ParseMediaType(p.Header.Get("Content-Type"))
+		parts[kind] = string(body)
+	}
+	if !strings.Contains(parts["text/plain"], "exited with code 1") {
+		t.Errorf("text part = %q", parts["text/plain"])
+	}
+	html := parts["text/html"]
+	for _, want := range []string{"Server Home &lt;1&gt; is down", "exited with code 1", "Alert",
+		`href="https://vpn.example.com/servers/3"`, `href="https://vpn.example.com/settings/notifications"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("html part missing %q", want)
+		}
 	}
 }
 

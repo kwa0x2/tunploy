@@ -189,7 +189,8 @@ func (n *Notifier) Test(ctx context.Context, cfg Config) error {
 	if cfg.PanelURL != "" {
 		body += "\nPanel: " + cfg.PanelURL + "\n"
 	}
-	err := n.send(ctx, cfg.SMTP, Message{To: cfg.To, Subject: "[Tunploy] Test email", Body: body})
+	err := n.send(ctx, cfg.SMTP, Message{To: cfg.To, Subject: "[Tunploy] Test email", Body: body,
+		HTML: renderHTML(testView(cfg.To, cfg.PanelURL))})
 	n.record(err)
 	return err
 }
@@ -212,7 +213,7 @@ func compose(batch []store.Event, to []string, panelURL string) Message {
 		b.WriteString("\nActivity log: " + strings.TrimSuffix(panelURL, "/") + "/activity\n")
 	}
 	b.WriteString("\n--\nSent by Tunploy. Choose which events send email under Settings → Notifications.\n")
-	return Message{To: to, Subject: subject, Body: b.String()}
+	return Message{To: to, Subject: subject, Body: b.String(), HTML: renderHTML(eventsView(batch, panelURL))}
 }
 
 func writeEvent(b *strings.Builder, e store.Event) {

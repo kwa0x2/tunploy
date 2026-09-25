@@ -40,6 +40,8 @@ type Message struct {
 	To      []string
 	Subject string
 	Body    string
+	// Optional; sent alongside Body, which stays for clients that show only text.
+	HTML string
 }
 
 // Send delivers one message, failing with the server's own words where it can.
@@ -128,17 +130,39 @@ func render(from *mail.Address, m Message, now time.Time) ([]byte, error) {
 	header("Date", now.Format(time.RFC1123Z))
 	header("Message-ID", "<"+hex.EncodeToString(id)+"@"+domain+">")
 	header("MIME-Version", "1.0")
-	header("Content-Type", "text/plain; charset=utf-8")
-	header("Content-Transfer-Encoding", "quoted-printable")
-	b.WriteString("\r\n")
 
-	qp := quotedprintable.NewWriter(&b)
-	body := strings.ReplaceAll(strings.ReplaceAll(m.Body, "\r\n", "\n"), "\n", "\r\n")
-	if _, err := qp.Write([]byte(body)); err != nil {
-		return nil, err
+	if m.HTML == "" {
+		header("Content-Type", "text/plain; charset=utf-8")
+		header("Content-Transfer-Encoding", "quoted-printable")
+		b.WriteString("\r\n")
+		if err := writeQP(&b, m.Body); err != nil {
+			return nil, err
+		}
+		return b.Bytes(), nil
 	}
-	if err := qp.Close(); err != nil {
-		return nil, err
+
+	boundary := "tunploy-" + hex.EncodeToString(id)
+	header("Content-Type", `multipart/alternative; boundary="`+boundary+`"`)
+	b.WriteString("\r\n")
+	for _, part := range []struct{ kind, body string }{{"text/plain", m.Body}, {"text/html", m.HTML}} {
+		b.WriteString("--" + boundary + "\r\n")
+		header("Content-Type", part.kind+"; charset=utf-8")
+		header("Content-Transfer-Encoding", "quoted-printable")
+		b.WriteString("\r\n")
+		if err := writeQP(&b, part.body); err != nil {
+			return nil, err
+		}
+		b.WriteString("\r\n")
 	}
+	b.WriteString("--" + boundary + "--\r\n")
 	return b.Bytes(), nil
+}
+
+func writeQP(b *bytes.Buffer, text string) error {
+	qp := quotedprintable.NewWriter(b)
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\n", "\r\n")
+	if _, err := qp.Write([]byte(text)); err != nil {
+		return err
+	}
+	return qp.Close()
 }
