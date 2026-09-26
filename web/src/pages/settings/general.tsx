@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { DnsPresets } from "@/components/dns-presets"
 import { FormField } from "@/components/form-field"
 import { PageHeader } from "@/components/page-header"
 import { useResource } from "@/hooks/use-resource"
@@ -115,6 +116,7 @@ function DefaultsCard({ settings, onSaved }: { settings: Settings; onSaved: () =
               onChange={(e) => setDns(e.target.value)}
               aria-invalid={Boolean(fieldErrors.default_dns)}
             />
+            <DnsPresets value={dns} onPick={setDns} />
           </FormField>
         </CardContent>
         <CardFooter className="justify-end">

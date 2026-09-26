@@ -2,6 +2,7 @@ package wg
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"net/netip"
 	"os"
@@ -71,6 +72,20 @@ func TestClientConfigMinimal(t *testing.T) {
 	in.PersistentKeepalive = 0
 	in.Endpoint = "2001:db8::1"
 	golden(t, "client-minimal.conf", ClientConfig(in, peers[0]))
+}
+
+func TestKillSwitchConfigGolden(t *testing.T) {
+	in, peers := fixture()
+	conf, err := KillSwitchConfig(in, peers[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "client-kill-switch.conf", conf)
+
+	in.ClientAllowedIPs = []netip.Prefix{netip.MustParsePrefix("10.8.0.0/24")}
+	if _, err := KillSwitchConfig(in, peers[0]); !errors.Is(err, ErrSplitTunnel) {
+		t.Fatalf("split tunnel: %v", err)
+	}
 }
 
 func TestServerConfigCannotBeInjectedThroughNames(t *testing.T) {

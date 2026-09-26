@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/netip"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -53,6 +54,15 @@ func (in Instance) Validate() map[string]string {
 		if !a.IsValid() {
 			fields["dns"] = "dns contains an invalid address"
 			break
+		}
+	}
+
+	if in.DNSOnServer {
+		switch {
+		case len(in.DNS) == 0:
+			fields["dns"] = "the resolver on the server needs at least one DNS server to forward to"
+		case in.Address.IsValid() && !slices.ContainsFunc(in.ClientAllowedIPs, func(p netip.Prefix) bool { return p.Contains(in.Address.Addr()) }):
+			fields["client_allowed_ips"] = "client allowed IPs must include the server's address, " + in.Address.Addr().String() + ", so clients reach its DNS"
 		}
 	}
 

@@ -71,12 +71,18 @@ type fakeDocker struct {
 	selfErr error
 	pullErr error
 	// gone makes the updater vanish as soon as it starts.
-	gone bool
+	gone    bool
+	helpers [][]string
 }
 
 func (f *fakeDocker) FindSelf(ctx context.Context) (docker.Self, error) { return f.self, f.selfErr }
 func (f *fakeDocker) PullImage(ctx context.Context, ref string) error   { return f.pullErr }
 func (f *fakeDocker) StartUpdater(ctx context.Context, self docker.Self, image string, cmd []string) error {
+	return nil
+}
+
+func (f *fakeDocker) RunHelper(ctx context.Context, name, image string, cmd, binds []string) error {
+	f.helpers = append(f.helpers, append([]string{image}, append(cmd, binds...)...))
 	return nil
 }
 
@@ -226,5 +232,29 @@ func TestResultIsReportedOnce(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, resultName)); !os.IsNotExist(err) {
 		t.Fatalf("result file left behind: %v", err)
+	}
+}
+
+func TestEnsureHostCLI(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		self docker.Self
+		want bool
+	}{
+		{"install script", docker.Self{Name: "tunploy", Image: "ghcr.io/kwa0x2/tunploy:0.7.0"}, true},
+		{"compose", docker.Self{Name: "tunploy", Image: "ghcr.io/kwa0x2/tunploy:0.7.0", Compose: "vpn"}, false},
+		{"other name", docker.Self{Name: "my-vpn", Image: "ghcr.io/kwa0x2/tunploy:0.7.0"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dk := &fakeDocker{self: tc.self}
+			New("0.7.0", t.TempDir(), dk, false).EnsureHostCLI(t.Context())
+			if got := len(dk.helpers) == 1; got != tc.want {
+				t.Fatalf("helpers = %v", dk.helpers)
+			}
+			if tc.want && strings.Join(dk.helpers[0], " ") !=
+				"ghcr.io/kwa0x2/tunploy:0.7.0 host-cli /host/tunploy ghcr.io/kwa0x2/tunploy /usr/local/bin:/host" {
+				t.Fatalf("helper = %v", dk.helpers[0])
+			}
+		})
 	}
 }

@@ -14,7 +14,7 @@ import (
 )
 
 const instanceColumns = `id, node_id, name, address, listen_port, private_key, public_key, endpoint,
-	dns, mtu, persistent_keepalive, client_allowed_ips, country, city, created_at, updated_at`
+	dns, dns_on_server, mtu, persistent_keepalive, client_allowed_ips, country, city, created_at, updated_at`
 
 const peerColumns = `id, instance_id, name, address, private_key, public_key, preshared_key,
 	enabled, data_limit, limit_period, usage_reset_at, expires_at, last_handshake, external_id, metadata,
@@ -28,10 +28,10 @@ func (s *Store) CreateInstance(ctx context.Context, in wg.Instance) (*wg.Instanc
 	now := time.Now().Unix()
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO wg_instances (node_id, name, address, listen_port, private_key, public_key, endpoint,
-			dns, mtu, persistent_keepalive, client_allowed_ips, country, city, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			dns, dns_on_server, mtu, persistent_keepalive, client_allowed_ips, country, city, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.NodeID, in.Name, in.Address.String(), in.ListenPort, in.PrivateKey.String(), in.PublicKey.String(),
-		in.Endpoint, joinList(in.DNS), in.MTU, in.PersistentKeepalive, joinList(in.ClientAllowedIPs),
+		in.Endpoint, joinList(in.DNS), in.DNSOnServer, in.MTU, in.PersistentKeepalive, joinList(in.ClientAllowedIPs),
 		in.Country, in.City, now, now)
 	if err != nil {
 		return nil, writeError("create instance", err)
@@ -70,10 +70,10 @@ func (s *Store) InstanceByID(ctx context.Context, id int64) (*wg.Instance, error
 // Address and keys stay: changing them would break every issued config.
 func (s *Store) UpdateInstance(ctx context.Context, in wg.Instance) (*wg.Instance, error) {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE wg_instances SET name = ?, listen_port = ?, endpoint = ?, dns = ?, mtu = ?,
+		`UPDATE wg_instances SET name = ?, listen_port = ?, endpoint = ?, dns = ?, dns_on_server = ?, mtu = ?,
 			persistent_keepalive = ?, client_allowed_ips = ?, country = ?, city = ?, updated_at = ?
 		 WHERE id = ?`,
-		in.Name, in.ListenPort, in.Endpoint, joinList(in.DNS), in.MTU,
+		in.Name, in.ListenPort, in.Endpoint, joinList(in.DNS), in.DNSOnServer, in.MTU,
 		in.PersistentKeepalive, joinList(in.ClientAllowedIPs), in.Country, in.City, time.Now().Unix(), in.ID)
 	if err != nil {
 		return nil, writeError("update instance", err)
@@ -289,7 +289,7 @@ func scanInstance(row rowScanner) (*wg.Instance, error) {
 		created, updated                    int64
 	)
 	err := row.Scan(&in.ID, &in.NodeID, &in.Name, &address, &in.ListenPort, &priv, &pub, &in.Endpoint,
-		&dns, &in.MTU, &in.PersistentKeepalive, &allowedIPs, &in.Country, &in.City, &created, &updated)
+		&dns, &in.DNSOnServer, &in.MTU, &in.PersistentKeepalive, &allowedIPs, &in.Country, &in.City, &created, &updated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

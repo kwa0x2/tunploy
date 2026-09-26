@@ -29,6 +29,7 @@ type instanceRequest struct {
 	ListenPort          *int      `json:"listen_port"`
 	Endpoint            *string   `json:"endpoint"`
 	DNS                 *[]string `json:"dns"`
+	DNSOnServer         *bool     `json:"dns_on_server"`
 	MTU                 *int      `json:"mtu"`
 	PersistentKeepalive *int      `json:"persistent_keepalive"`
 	ClientAllowedIPs    *[]string `json:"client_allowed_ips"`
@@ -341,11 +342,17 @@ func (s *Server) updateInstance(ctx context.Context, current *wg.Instance, req i
 		return nil, instanceWriteError(err)
 	}
 
-	// Port and MTU are fixed at container creation.
+	// Port and MTU are fixed at container creation; the resolver follows its
+	// file, like peers.
 	s.record(ctx, instanceEvent("server.updated", updated))
-	if updated.ListenPort != current.ListenPort || updated.MTU != current.MTU {
+	switch {
+	case updated.ListenPort != current.ListenPort || updated.MTU != current.MTU:
 		if err := s.deploy.Redeploy(ctx, updated.ID); err != nil {
 			return nil, deployError(err)
+		}
+	case updated.DNSOnServer != current.DNSOnServer || !slices.Equal(updated.DNS, current.DNS):
+		if err := s.deploy.Apply(ctx, updated.ID); err != nil {
+			return nil, applyError(err)
 		}
 	}
 	return updated, nil
@@ -446,6 +453,9 @@ func (req instanceRequest) apply(in *wg.Instance) map[string]string {
 			fields["dns"] = "dns must be a list of IP addresses"
 		}
 		in.DNS = addrs
+	}
+	if req.DNSOnServer != nil {
+		in.DNSOnServer = *req.DNSOnServer
 	}
 	if req.MTU != nil {
 		in.MTU = *req.MTU

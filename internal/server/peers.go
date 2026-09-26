@@ -375,12 +375,37 @@ func (s *Server) handlePeerConfig(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
+	conf, err := clientConfig(r, in, p)
+	if err != nil {
+		return err
+	}
+	return writeConfig(w, p, conf)
+}
 
+// clientConfig is the device's config, with a Linux kill switch when the
+// request asks for one.
+func clientConfig(r *http.Request, in *wg.Instance, p *wg.Peer) ([]byte, error) {
+	switch r.URL.Query().Get("kill_switch") {
+	case "", "false":
+		return wg.ClientConfig(*in, *p), nil
+	case "true":
+		conf, err := wg.KillSwitchConfig(*in, *p)
+		if errors.Is(err, wg.ErrSplitTunnel) {
+			return nil, httpx.Errorf(http.StatusConflict, "split_tunnel",
+				"a kill switch needs a server whose clients send all traffic through it (client allowed IPs 0.0.0.0/0)")
+		}
+		return conf, err
+	default:
+		return nil, httpx.BadRequest("kill_switch must be true or false")
+	}
+}
+
+func writeConfig(w http.ResponseWriter, p *wg.Peer, conf []byte) error {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.conf"`, tunnelName(p.Name)))
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(wg.ClientConfig(*in, *p))
+	_, err := w.Write(conf)
 	return err
 }
 

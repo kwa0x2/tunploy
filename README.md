@@ -53,6 +53,8 @@ Open `http://YOUR_SERVER_IP:3000`, sign in, and [create your first VPN](#create-
 - [Using the panel](#using-the-panel)
   - [Sign in](#sign-in)
   - [Create your first VPN](#create-your-first-vpn)
+  - [DNS](#dns)
+  - [Kill switch](#kill-switch)
   - [More servers (nodes)](#more-servers-nodes)
   - [HTTPS](#https)
   - [Two-factor authentication](#two-factor-authentication)
@@ -159,6 +161,23 @@ Out of the box the panel serves plain HTTP, so your password and session travel 
 3. Connect. The peer shows up as **Online** within a few seconds.
 
 The endpoint that clients connect to comes from **Settings → General**. If the install script detected the wrong address, change it there before creating servers. Existing servers keep their own endpoint, which you can change under each server's settings.
+
+### DNS
+
+Each server tells its devices which DNS servers to use. Pick a provider in the server's settings (Cloudflare, Quad9 to block malware, AdGuard to block ads and trackers, Cloudflare Family, Google) or type your own; **Settings → General** sets the default for new servers.
+
+Turn on **Resolve on the server** and devices ask the server itself (its tunnel address, such as `10.8.0.1`), which caches answers and forwards to the providers you chose. Lookups get faster, stay inside the tunnel even on a split tunnel, and you can switch provider later without sending devices new configs. Turning the option on or off does change the configs.
+
+### Kill switch
+
+A kill switch blocks a device's internet while the VPN is down, so nothing leaks around it. WireGuard's apps each have their own, and it needs a server that carries all traffic (the default, `0.0.0.0/0, ::/0`):
+
+| Device | How |
+| --- | --- |
+| Windows | On by default: **Block untunneled traffic** in the tunnel's settings. |
+| Android | **Settings → Network → VPN → WireGuard ⚙ → Always-on VPN** and **Block connections without VPN**. |
+| iPhone, Mac | Turn on **On-Demand** for the tunnel so it reconnects on every network. Apple has no full block for WireGuard. |
+| Linux | Download the config **with kill switch** from the device's QR code window (or `?kill_switch=true` from the API). It adds firewall rules while `wg-quick` has the tunnel up. |
 
 ### More servers (nodes)
 
@@ -300,7 +319,7 @@ Keep keys on your own server. A key built into a mobile app or web page can be p
 | `GET /api/v1/devices` | filter with `server_id`, `external_id`, `status` (`active`, `disabled`, `expired`, `limit_reached`) |
 | `POST /api/v1/devices` | `server_id` (an ID or `"auto"`), and optionally `name`, `public_key`, `external_id`, `metadata`, `enabled`, `data_limit`, `limit_period`, `expires_at` |
 | `GET`, `PATCH`, `DELETE /api/v1/devices/{id}` | `PATCH` takes the fields of a create except `server_id` and `public_key`; `null` clears `metadata` or `expires_at` |
-| `GET /api/v1/devices/{id}/config` | the `.conf` file, or a PNG QR code with `?format=qr` |
+| `GET /api/v1/devices/{id}/config` | the `.conf` file, or a PNG QR code with `?format=qr`; `?kill_switch=true` for Linux |
 | `GET /api/v1/devices/{id}/usage` | what counts toward the limit, this month, and daily and monthly traffic |
 | `POST /api/v1/devices/{id}/usage/reset` | start the count toward the data limit again from now |
 | `POST /api/v1/devices/{id}/move` | `server_id` (an ID or `"auto"`); returns the device with its new config |
@@ -429,7 +448,7 @@ The install script puts a `tunploy` command on the server, for what can't be don
 | `tunploy update [version]` | Update to the newest release, or to the given one, by running the install script again. |
 | `tunploy uninstall` | Remove Tunploy (see [Uninstall](#uninstall)). |
 
-The commands run in the panel's container, so they always match the version it runs. They need root and ask for `sudo` on their own, unless you are in the `docker` group.
+The commands run in the panel's container, so they always match the version it runs. They need root and ask for `sudo` on their own, unless you are in the `docker` group. The panel also puts the command back each time it starts, so a server installed before the command existed gets it after its next update.
 
 ### Manage the admin account
 
@@ -497,9 +516,13 @@ The panel container reads these environment variables. With the install script, 
 
 **The peer never comes online.** The UDP port is almost always blocked by the provider's firewall. Also check that the endpoint in the client config is the server's public address and not `localhost` or a private IP.
 
+**Some sites load slowly or hang half way.** Usually the network's MTU is smaller than the tunnel expects, as on many mobile and PPPoE connections. Set the server's MTU to 1380 (or 1280) in its settings and have the device import its config again.
+
 **Connected, but no internet.** Check that the server itself has outbound connectivity, and that no host firewall rule drops forwarded traffic.
 
 **HTTPS does not work.** **Settings → Domain** shows why the last certificate request failed. Check that the domain's A record points to the server (`dig +short panel.example.com`) and that TCP 80 and 443 are open in the provider's firewall.
+
+**`tunploy: command not found`.** The server was installed before the command existed. Run the install command again (it keeps your data), or update the panel once from **Settings → Updates**; until then `docker exec -it tunploy tunploy admin ...` does the same.
 
 **Forgot the admin password.** Run `tunploy admin reset-password --email you@example.com` on the server. Servers and peers are not affected.
 

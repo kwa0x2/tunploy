@@ -685,6 +685,8 @@ func (m *Manager) container(ctx context.Context, h Host, instanceID int64) (*doc
 }
 
 // The container mounts the directory, not the file, so it sees the rename.
+const resolverFile = "dns-servers.conf"
+
 func (m *Manager) writeConfig(ctx context.Context, h Host, in *wg.Instance) error {
 	peers, _, blocked, err := m.blockedPeers(ctx, in.ID)
 	if err != nil {
@@ -692,8 +694,18 @@ func (m *Manager) writeConfig(ctx context.Context, h Host, in *wg.Instance) erro
 	}
 	allowed := slices.DeleteFunc(peers, func(p wg.Peer) bool { return blocked[p.ID] != "" })
 
-	path := filepath.Join(configDir(h, in.ID), iface+".conf")
-	if err := h.WriteFile(ctx, path, wg.ServerConfig(*in, allowed)); err != nil {
+	dir := configDir(h, in.ID)
+	if err := h.WriteFile(ctx, filepath.Join(dir, iface+".conf"), wg.ServerConfig(*in, allowed)); err != nil {
+		return err
+	}
+	// The container starts or stops its resolver by whether this file exists.
+	resolver := filepath.Join(dir, resolverFile)
+	if in.DNSOnServer {
+		err = h.WriteFile(ctx, resolver, wg.ResolverConfig(*in))
+	} else {
+		err = h.RemoveAll(ctx, resolver)
+	}
+	if err != nil {
 		return err
 	}
 	m.stateMu.Lock()

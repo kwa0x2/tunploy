@@ -56,6 +56,8 @@ func main() {
 			os.Exit(runBackup(os.Args[2:]))
 		case "self-update":
 			os.Exit(runSelfUpdate(os.Args[2:]))
+		case "host-cli":
+			os.Exit(runHostCLI(os.Args[2:]))
 		case "health":
 			os.Exit(runHealth())
 		case "version", "--version":
@@ -141,6 +143,7 @@ func run() error {
 	go handler.RunWebhooks(ctx)
 	go handler.RunBackups(ctx)
 	go updates.Run(ctx)
+	go updates.EnsureHostCLI(ctx)
 	go housekeeping(ctx, st)
 
 	panel := newHTTPServer(cfg.Listen, handler)

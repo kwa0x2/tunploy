@@ -10,11 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/hostcli"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
@@ -39,6 +41,7 @@ type Docker interface {
 	PullImage(ctx context.Context, ref string) error
 	StartUpdater(ctx context.Context, self docker.Self, image string, cmd []string) error
 	Running(ctx context.Context, id string) (bool, int, error)
+	RunHelper(ctx context.Context, name, image string, cmd, binds []string) error
 }
 
 type Release struct {
@@ -305,6 +308,24 @@ func (s *Service) findSelf(ctx context.Context) (docker.Self, error) {
 	}
 	s.selfErr = err
 	return self, err
+}
+
+// installName is the container the install script creates.
+const installName = "tunploy"
+
+// EnsureHostCLI puts the tunploy command on the server. The install script
+// does too, but a panel installed before the command existed and updated
+// from the panel since would never get it.
+func (s *Service) EnsureHostCLI(ctx context.Context) {
+	self, err := s.findSelf(ctx)
+	if err != nil || self.Compose != "" || self.Name != installName {
+		return
+	}
+	dir := filepath.Dir(hostcli.Path)
+	cmd := []string{"host-cli", "/host/" + filepath.Base(hostcli.Path), Repository(self.Image)}
+	if err := s.docker.RunHelper(ctx, "tunploy-host-cli", self.Image, cmd, []string{dir + ":/host"}); err != nil {
+		slog.Warn("install the tunploy command on the server; run the install script again to add it", "error", err)
+	}
 }
 
 // ContainerName is the panel's own container, or empty outside Docker.

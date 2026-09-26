@@ -310,7 +310,14 @@ function ConnectionCard({ instance }: { instance: Instance }) {
     ["Endpoint", endpointOf(instance), endpointOf(instance)],
     ["Server address", instance.address],
     ["Public key", instance.public_key, instance.public_key],
-    ["DNS", instance.dns.length ? instance.dns.join(", ") : "None"],
+    [
+      "DNS",
+      instance.dns_on_server
+        ? `${instance.address.split("/")[0]} on this server, forwarding to ${instance.dns.join(", ")}`
+        : instance.dns.length
+          ? instance.dns.join(", ")
+          : "None",
+    ],
     ["MTU", instance.mtu || "1420"],
     ["Keepalive", instance.persistent_keepalive ? `${instance.persistent_keepalive}s` : "Off"],
     ["Routed", instance.client_allowed_ips.join(", ")],
@@ -535,6 +542,7 @@ function PeersCard({ instance, peers, error, reload }: {
         peer={showing.target}
         open={showing.open}
         onOpenChange={showing.onOpenChange}
+        fullTunnel={instance.client_allowed_ips.includes("0.0.0.0/0")}
       />
       <PeerUsageDialog
         peer={peers?.find((p) => p.id === usage.target?.id) ?? usage.target}

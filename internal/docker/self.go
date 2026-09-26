@@ -302,3 +302,33 @@ func (c *Client) ExecUnmanaged(ctx context.Context, id string, cmd []string) ([]
 }
 
 func isShortID(id, s string) bool { return len(s) >= 12 && strings.HasPrefix(id, s) }
+
+// RunHelper runs cmd in a throwaway container of image with binds, and
+// waits for it to finish.
+func (c *Client) RunHelper(ctx context.Context, name, image string, cmd, binds []string) error {
+	_, _ = c.api.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true})
+	created, err := c.api.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name:       name,
+		Config:     &container.Config{Image: image, Cmd: cmd},
+		HostConfig: &container.HostConfig{Binds: binds},
+	})
+	if err != nil {
+		return wrap(err, "create container")
+	}
+	defer c.api.ContainerRemove(context.WithoutCancel(ctx), created.ID, client.ContainerRemoveOptions{Force: true})
+
+	if _, err := c.api.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		return wrap(err, "start container")
+	}
+	wait := c.api.ContainerWait(ctx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	select {
+	case res := <-wait.Result:
+		if res.StatusCode != 0 {
+			out, _ := c.TailUnmanaged(ctx, created.ID, 5)
+			return fmt.Errorf("docker: %s exited with %d: %s", name, res.StatusCode, strings.TrimSpace(out))
+		}
+		return nil
+	case err := <-wait.Error:
+		return wrap(err, "wait for container")
+	}
+}

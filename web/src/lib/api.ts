@@ -61,6 +61,8 @@ export interface InstanceSettings {
   listen_port: number
   endpoint: string
   dns: string[]
+  // Clients ask a resolver on the server, which forwards to dns.
+  dns_on_server?: boolean
   mtu: number
   persistent_keepalive: number
   client_allowed_ips: string[]
@@ -488,8 +490,8 @@ const peerPath = (instanceId: number, peerId: number) =>
 export const backupExportUrl = "/api/backups/export"
 export const backupFileUrl = (name: string) => `/api/backups/${encodeURIComponent(name)}`
 
-export const peerConfigUrl = (instanceId: number, peerId: number) =>
-  `${peerPath(instanceId, peerId)}/config`
+export const peerConfigUrl = (instanceId: number, peerId: number, killSwitch = false) =>
+  `${peerPath(instanceId, peerId)}/config${killSwitch ? "?kill_switch=true" : ""}`
 
 async function fetchRaw(path: string, init?: RequestInit): Promise<Response> {
   let res: Response

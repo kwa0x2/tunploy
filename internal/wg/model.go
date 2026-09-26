@@ -29,8 +29,11 @@ type Instance struct {
 	PrivateKey Key          `json:"-"`
 	PublicKey  Key          `json:"public_key"`
 	// Host only; the port comes from ListenPort.
-	Endpoint            string         `json:"endpoint"`
-	DNS                 []netip.Addr   `json:"dns"`
+	Endpoint string       `json:"endpoint"`
+	DNS      []netip.Addr `json:"dns"`
+	// Clients ask a resolver on the server's own tunnel address, which
+	// forwards to DNS; then DNS can change without new client configs.
+	DNSOnServer         bool           `json:"dns_on_server"`
 	MTU                 int            `json:"mtu"`
 	PersistentKeepalive int            `json:"persistent_keepalive"`
 	ClientAllowedIPs    []netip.Prefix `json:"client_allowed_ips"`

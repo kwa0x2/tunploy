@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import type { FormEvent } from "react"
-import { Download, Loader2 } from "lucide-react"
+import { ChevronDown, Download, Loader2, ShieldCheck } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -547,9 +547,11 @@ interface ConfigProps {
   peer?: Peer
   open: boolean
   onOpenChange: (open: boolean) => void
+  // Whether the server's clients send everything through it; a kill switch needs that.
+  fullTunnel: boolean
 }
 
-export function PeerConfigDialog({ peer, open, onOpenChange }: ConfigProps) {
+export function PeerConfigDialog({ peer, open, onOpenChange, fullTunnel }: ConfigProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -561,13 +563,13 @@ export function PeerConfigDialog({ peer, open, onOpenChange }: ConfigProps) {
               : "Scan with the WireGuard app, or download the file for a desktop client. Anyone with this config can join the VPN as this peer."}
           </DialogDescription>
         </DialogHeader>
-        {peer && <PeerConfig key={peer.id} peer={peer} />}
+        {peer && <PeerConfig key={peer.id} peer={peer} fullTunnel={fullTunnel} />}
       </DialogContent>
     </Dialog>
   )
 }
 
-function PeerConfig({ peer }: { peer: Peer }) {
+function PeerConfig({ peer, fullTunnel }: { peer: Peer; fullTunnel: boolean }) {
   const [config, setConfig] = useState<string>()
   const [error, setError] = useState("")
 
@@ -618,6 +620,7 @@ function PeerConfig({ peer }: { peer: Peer }) {
           <Skeleton className="size-[248px] rounded-lg" />
         )}
       </div>
+      <KillSwitchHelp peer={peer} fullTunnel={fullTunnel} />
       <DialogFooter>
         {config && <CopyButton value={config} label="Copy config" showLabel />}
         <Button
@@ -630,5 +633,63 @@ function PeerConfig({ peer }: { peer: Peer }) {
         </Button>
       </DialogFooter>
     </div>
+  )
+}
+
+// WireGuard's apps each have their own switch; only wg-quick on Linux needs
+// it written into the config.
+function KillSwitchHelp({ peer, fullTunnel }: { peer: Peer; fullTunnel: boolean }) {
+  return (
+    <details className="group rounded-lg border p-3 text-sm">
+      <summary className="flex cursor-pointer list-none items-center justify-between font-medium">
+        <span className="flex items-center gap-2">
+          <ShieldCheck className="size-4" />
+          Kill switch
+        </span>
+        <ChevronDown className="text-muted-foreground size-4 transition-transform group-open:rotate-180" />
+      </summary>
+      {fullTunnel ? (
+        <div className="mt-3 space-y-2">
+          <p className="text-muted-foreground">
+            Blocks the device&apos;s internet while the VPN is down, so nothing leaks past it.
+          </p>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+            <dt className="font-medium">Windows</dt>
+            <dd className="text-muted-foreground">
+              On by default: &quot;Block untunneled traffic&quot; in the tunnel&apos;s settings.
+            </dd>
+            <dt className="font-medium">Android</dt>
+            <dd className="text-muted-foreground">
+              Settings → Network → VPN → WireGuard ⚙ → Always-on VPN and Block connections without
+              VPN.
+            </dd>
+            <dt className="font-medium">iPhone, Mac</dt>
+            <dd className="text-muted-foreground">
+              Turn on On-Demand for the tunnel in the WireGuard app, so it reconnects on every
+              network. Apple has no full block for WireGuard.
+            </dd>
+            <dt className="font-medium">Linux</dt>
+            <dd className="text-muted-foreground">
+              Use the download below with <code className="font-mono text-xs">wg-quick</code>; it adds
+              firewall rules while the tunnel is up.
+            </dd>
+          </dl>
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<a href={peerConfigUrl(peer.instance_id, peer.id, true)} download />}
+          >
+            <Download />
+            Download for Linux with kill switch
+          </Button>
+        </div>
+      ) : (
+        <p className="text-muted-foreground mt-3">
+          A kill switch blocks everything outside the VPN, but this server only carries some
+          traffic. Set its client allowed IPs to 0.0.0.0/0 to use one.
+        </p>
+      )}
+    </details>
   )
 }

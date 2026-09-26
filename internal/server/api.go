@@ -510,17 +510,19 @@ func (s *Server) apiDeviceConfig(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	conf := wg.ClientConfig(*in, *p)
+	conf, err := clientConfig(r, in, p)
+	if err != nil {
+		return err
+	}
 	w.Header().Set("Cache-Control", "no-store")
 
 	switch format := r.URL.Query().Get("format"); format {
 	case "", "conf":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.conf"`, tunnelName(p.Name)))
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(conf)
-		return err
+		return writeConfig(w, p, conf)
 	case "qr":
+		if r.URL.Query().Get("kill_switch") == "true" {
+			return httpx.BadRequest("the kill switch config is for Linux; phone apps refuse its PostUp lines, so there is no QR code for it")
+		}
 		if p.KeyOnClient() {
 			return httpx.Errorf(http.StatusConflict, "client_key",
 				"the client holds this device's private key, so there is no complete config to put in a QR code")
@@ -668,6 +670,7 @@ type apiServer struct {
 	Address             netip.Prefix   `json:"address"`
 	Subnet              netip.Prefix   `json:"subnet"`
 	DNS                 []netip.Addr   `json:"dns"`
+	DNSOnServer         bool           `json:"dns_on_server"`
 	MTU                 int            `json:"mtu"`
 	PersistentKeepalive int            `json:"persistent_keepalive"`
 	ClientAllowedIPs    []netip.Prefix `json:"client_allowed_ips"`
@@ -707,6 +710,7 @@ func (s *Server) apiServers(ctx context.Context, instances []wg.Instance) ([]api
 			Address:             in.Address,
 			Subnet:              in.Subnet(),
 			DNS:                 in.DNS,
+			DNSOnServer:         in.DNSOnServer,
 			MTU:                 in.MTU,
 			PersistentKeepalive: in.PersistentKeepalive,
 			ClientAllowedIPs:    in.ClientAllowedIPs,

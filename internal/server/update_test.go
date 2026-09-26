@@ -38,6 +38,9 @@ func (f *fakeSelf) StartUpdater(ctx context.Context, self docker.Self, image str
 }
 
 func (f *fakeSelf) Running(ctx context.Context, id string) (bool, int, error) { return true, 0, nil }
+func (f *fakeSelf) RunHelper(ctx context.Context, name, image string, cmd, binds []string) error {
+	return nil
+}
 
 type updateJSON struct {
 	Current   string `json:"current"`

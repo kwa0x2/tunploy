@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -311,5 +313,86 @@ func TestAPIGroups(t *testing.T) {
 	}
 	if len(events) != 4 {
 		t.Fatalf("want a reset and a delete per device, got %+v", events)
+	}
+}
+
+func TestKillSwitchConfig(t *testing.T) {
+	p := newPanel(t)
+	full := p.createInstance(map[string]any{"name": "Frankfurt"})
+	split := p.createInstance(map[string]any{"name": "Office", "client_allowed_ips": []string{"192.168.10.0/24"}})
+	token := p.apiKey("app", "devices:read", "devices:write")
+
+	var d deviceJSON
+	p.want(p.api(token, "POST", "/api/v1/devices", map[string]any{"server_id": full.ID}), http.StatusCreated, &d)
+	rec := p.api(token, "GET", fmt.Sprintf("/api/v1/devices/%d/config?kill_switch=true", d.ID), nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "PostUp = iptables -I OUTPUT") ||
+		!strings.Contains(rec.Body.String(), "PreDown = iptables -D OUTPUT") {
+		t.Fatalf("kill switch config: %d\n%s", rec.Code, rec.Body)
+	}
+	if rec := p.api(token, "GET", fmt.Sprintf("/api/v1/devices/%d/config", d.ID), nil); strings.Contains(rec.Body.String(), "PostUp") {
+		t.Fatal("the plain config must stay importable on phones")
+	}
+	p.wantError(p.api(token, "GET", fmt.Sprintf("/api/v1/devices/%d/config?kill_switch=true&format=qr", d.ID), nil),
+		http.StatusBadRequest, "invalid_request")
+	p.wantError(p.api(token, "GET", fmt.Sprintf("/api/v1/devices/%d/config?kill_switch=maybe", d.ID), nil),
+		http.StatusBadRequest, "invalid_request")
+
+	peer := p.createPeer(split.ID, "laptop")
+	p.wantError(p.do("GET", fmt.Sprintf("/api/instances/%d/peers/%d/config?kill_switch=true", split.ID, peer.ID), nil),
+		http.StatusConflict, "split_tunnel")
+	rec = p.do("GET", fmt.Sprintf("/api/instances/%d/peers/%d/config?kill_switch=true", full.ID, d.ID), nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "PostUp") {
+		t.Fatalf("panel kill switch config: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestDNSOnServer(t *testing.T) {
+	p := newPanel(t)
+	in := p.createInstance(map[string]any{"name": "Frankfurt", "dns": []string{"9.9.9.9"}, "dns_on_server": true})
+	peer := p.createPeer(in.ID, "laptop")
+	resolver := filepath.Join(p.s.deploy.ConfigDir(in.ID), "dns-servers.conf")
+
+	config := func() string {
+		t.Helper()
+		rec := p.do("GET", fmt.Sprintf("/api/instances/%d/peers/%d/config", in.ID, peer.ID), nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("config: %d %s", rec.Code, rec.Body)
+		}
+		return rec.Body.String()
+	}
+	if !strings.Contains(config(), "DNS = 10.8.0.1\n") {
+		t.Fatalf("clients should ask the server:\n%s", config())
+	}
+	if b, err := os.ReadFile(resolver); err != nil || string(b) != "server=9.9.9.9\n" {
+		t.Fatalf("resolver file = %q, %v", b, err)
+	}
+
+	// A new upstream reaches the resolver without new client configs.
+	p.want(p.do("PATCH", fmt.Sprintf("/api/instances/%d", in.ID), map[string]any{"dns": []string{"94.140.14.14"}}), http.StatusOK, nil)
+	if b, _ := os.ReadFile(resolver); string(b) != "server=94.140.14.14\n" {
+		t.Fatalf("resolver file after change = %q", b)
+	}
+	if !strings.Contains(config(), "DNS = 10.8.0.1\n") {
+		t.Fatal("client DNS changed with the upstream")
+	}
+
+	p.want(p.do("PATCH", fmt.Sprintf("/api/instances/%d", in.ID), map[string]any{"dns_on_server": false}), http.StatusOK, nil)
+	if _, err := os.Stat(resolver); !os.IsNotExist(err) {
+		t.Fatalf("resolver file should be gone: %v", err)
+	}
+	if !strings.Contains(config(), "DNS = 94.140.14.14\n") {
+		t.Fatalf("clients should ask the upstream again:\n%s", config())
+	}
+
+	e := p.wantError(p.do("PATCH", fmt.Sprintf("/api/instances/%d", in.ID), map[string]any{"dns_on_server": true, "dns": []string{}}),
+		http.StatusUnprocessableEntity, "validation_failed")
+	if e.Error.Fields["dns"] == "" {
+		t.Fatalf("fields = %v", e.Error.Fields)
+	}
+	e = p.wantError(p.do("PATCH", fmt.Sprintf("/api/instances/%d", in.ID), map[string]any{
+		"dns_on_server": true, "client_allowed_ips": []string{"192.168.10.0/24"},
+	}), http.StatusUnprocessableEntity, "validation_failed")
+	if !strings.Contains(e.Error.Fields["client_allowed_ips"], "10.8.0.1") {
+		t.Fatalf("fields = %v", e.Error.Fields)
 	}
 }

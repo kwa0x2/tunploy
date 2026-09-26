@@ -12,6 +12,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import { DnsPresets } from "@/components/dns-presets"
 import { DeployProgress } from "@/components/deploy-progress"
 import type { DeployState } from "@/components/deploy-progress"
 import { FormField } from "@/components/form-field"
@@ -52,6 +54,7 @@ interface Values {
   listen_port: string
   address: string
   dns: string
+  dns_on_server: boolean
   mtu: string
   persistent_keepalive: string
   client_allowed_ips: string
@@ -65,6 +68,7 @@ const empty: Values = {
   listen_port: "",
   address: "",
   dns: "",
+  dns_on_server: false,
   mtu: "",
   persistent_keepalive: "",
   client_allowed_ips: "",
@@ -79,6 +83,7 @@ function valuesOf(s: InstanceSettings & { name?: string }): Values {
     listen_port: String(s.listen_port),
     address: s.address,
     dns: s.dns.join(", "),
+    dns_on_server: s.dns_on_server ?? false,
     mtu: s.mtu ? String(s.mtu) : "",
     persistent_keepalive: String(s.persistent_keepalive),
     client_allowed_ips: s.client_allowed_ips.join(", "),
@@ -160,6 +165,7 @@ function InstanceForm(
     text("endpoint")
     int("listen_port")
     list("dns")
+    if (values.dns_on_server || !isCreate) input.dns_on_server = values.dns_on_server
     if (isCreate) {
       text("address")
       // Left out, the panel guesses the country from the endpoint.
@@ -388,11 +394,34 @@ function InstanceForm(
               onChange={set("dns")}
               aria-invalid={Boolean(fieldErrors.dns)}
             />
+            <DnsPresets value={values.dns} onPick={(dns) => setValues((v) => ({ ...v, dns }))} />
           </FormField>
+          <div className="flex items-start justify-between gap-4">
+            <label htmlFor="dns_on_server" className="text-sm">
+              <span className="font-medium">Resolve on the server</span>
+              <span className="text-muted-foreground block text-xs">
+                Devices ask this server, which caches answers and forwards to the DNS servers
+                above. Change those later without new configs.
+                {!isCreate &&
+                  values.dns_on_server !== (props.mode === "edit" && props.instance.dns_on_server) &&
+                  " Devices need their config again after this change."}
+              </span>
+            </label>
+            <Switch
+              id="dns_on_server"
+              checked={values.dns_on_server}
+              onCheckedChange={(on) => setValues((v) => ({ ...v, dns_on_server: on }))}
+            />
+          </div>
           {!isCreate && (
             <>
               <div className="grid grid-cols-2 gap-4">
-                <FormField id="mtu" label="MTU" error={fieldErrors.mtu}>
+                <FormField
+                  id="mtu"
+                  label="MTU"
+                  error={fieldErrors.mtu}
+                  hint="Try 1380 or 1280 if some sites hang on mobile or PPPoE networks."
+                >
                   <Input
                     id="mtu"
                     inputMode="numeric"

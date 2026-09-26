@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/hostcli"
 	"github.com/kwa0x2/tunploy/internal/update"
 )
 
@@ -98,6 +99,24 @@ func runHealth() int {
 	if resp.StatusCode != http.StatusOK {
 		fmt.Fprintln(os.Stderr, "health:", resp.Status)
 		return 1
+	}
+	return 0
+}
+
+// runHostCLI runs in a helper container with the server's bin directory
+// mounted, to put the tunploy command there.
+func runHostCLI(args []string) int {
+	if len(args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: tunploy host-cli PATH IMAGE")
+		return 2
+	}
+	changed, err := hostcli.Install(args[0], args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	if changed {
+		fmt.Println("installed the tunploy command")
 	}
 	return 0
 }

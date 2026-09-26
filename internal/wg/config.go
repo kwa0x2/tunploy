@@ -2,9 +2,11 @@ package wg
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -49,8 +51,8 @@ func ClientConfig(in Instance, p Peer) []byte {
 		field(&b, "PrivateKey", p.PrivateKey.String())
 	}
 	field(&b, "Address", netip.PrefixFrom(p.Address, p.Address.BitLen()).String())
-	if len(in.DNS) > 0 {
-		field(&b, "DNS", join(in.DNS))
+	if dns := in.ClientDNS(); len(dns) > 0 {
+		field(&b, "DNS", join(dns))
 	}
 	if in.MTU > 0 {
 		field(&b, "MTU", strconv.Itoa(in.MTU))
@@ -66,6 +68,54 @@ func ClientConfig(in Instance, p Peer) []byte {
 	}
 
 	return b.Bytes()
+}
+
+// ErrSplitTunnel: a kill switch blocks what bypasses the tunnel, which on a
+// split tunnel is everything but the VPN.
+var ErrSplitTunnel = errors.New("the server's clients send only some traffic through the tunnel")
+
+// The rules from wg-quick(8): anything not leaving through the tunnel, and
+// not WireGuard's own marked packets, is refused while it is up.
+const killSwitchRule = "OUTPUT ! -o %i -m mark ! --mark $(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT"
+
+// KillSwitchConfig is ClientConfig for wg-quick on Linux, with firewall rules
+// that stop traffic while the tunnel is down. Phone and Windows apps refuse
+// PostUp lines, and do the same with their own settings.
+func KillSwitchConfig(in Instance, p Peer) ([]byte, error) {
+	if !in.FullTunnel() {
+		return nil, ErrSplitTunnel
+	}
+	conf := ClientConfig(in, p)
+	var rules bytes.Buffer
+	field(&rules, "PostUp", "iptables -I "+killSwitchRule+" && ip6tables -I "+killSwitchRule)
+	field(&rules, "PreDown", "iptables -D "+killSwitchRule+" && ip6tables -D "+killSwitchRule)
+	peer := bytes.Index(conf, []byte("\n[Peer]"))
+	return slices.Concat(conf[:peer], rules.Bytes(), conf[peer:]), nil
+}
+
+// ClientDNS is what clients are told to ask.
+func (in Instance) ClientDNS() []netip.Addr {
+	if in.DNSOnServer {
+		return []netip.Addr{in.Address.Addr()}
+	}
+	return in.DNS
+}
+
+// ResolverConfig is the upstream list for the resolver on the server, in
+// dnsmasq's servers-file format.
+func ResolverConfig(in Instance) []byte {
+	var b bytes.Buffer
+	for _, a := range in.DNS {
+		fmt.Fprintf(&b, "server=%s\n", a)
+	}
+	return b.Bytes()
+}
+
+// FullTunnel reports whether clients send all IPv4 traffic through the server.
+func (in Instance) FullTunnel() bool {
+	return slices.ContainsFunc(in.ClientAllowedIPs, func(p netip.Prefix) bool {
+		return p.Addr().Is4() && p.Bits() == 0
+	})
 }
 
 func field(b *bytes.Buffer, key, value string) {

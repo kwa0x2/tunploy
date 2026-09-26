@@ -485,7 +485,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`client_key`: no QR code for a device whose private key the panel never had.",
+            "description": "`client_key`: no QR code for a device that holds its own key; `split_tunnel`: a kill switch needs a server whose clients send all traffic through it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -528,6 +528,14 @@
               "default": "conf"
             },
             "description": ""
+          },
+          {
+            "name": "kill_switch",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "`true` adds wg-quick firewall rules that block all traffic outside the tunnel while it is up, for Linux. Only with `format=conf`: phone and Windows apps refuse the PostUp lines, and have their own kill switch setting."
           }
         ]
       }
@@ -1222,6 +1230,10 @@
                       "type": "string"
                     }
                   },
+                  "dns_on_server": {
+                    "type": "boolean",
+                    "description": "Devices ask a caching resolver on the server's tunnel address, which forwards to `dns`. `dns` can then change without new client configs; turning this on or off changes the configs. Needs at least one `dns` entry, and `client_allowed_ips` that include the server's address."
+                  },
                   "mtu": {
                     "type": "integer",
                     "description": "1280 to 1500, or 0 for the default."
@@ -1393,6 +1405,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "dns_on_server": {
+                    "type": "boolean",
+                    "description": "Devices ask a caching resolver on the server's tunnel address, which forwards to `dns`. `dns` can then change without new client configs; turning this on or off changes the configs. Needs at least one `dns` entry, and `client_allowed_ips` that include the server's address."
                   },
                   "mtu": {
                     "type": "integer",
@@ -2665,6 +2681,7 @@
           "address",
           "subnet",
           "dns",
+          "dns_on_server",
           "mtu",
           "persistent_keepalive",
           "client_allowed_ips",
@@ -2743,6 +2760,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "dns_on_server": {
+            "type": "boolean",
+            "description": "Devices ask a resolver on the server's address, which forwards to `dns`."
           },
           "mtu": {
             "type": "integer",

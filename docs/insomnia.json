@@ -495,6 +495,32 @@
       "settingStoreCookies": true
     },
     {
+      "_id": "req_51",
+      "_type": "request",
+      "parentId": "fld_devices",
+      "name": "Config for Linux with kill switch",
+      "description": "wg-quick blocks all traffic outside the tunnel while it is up. Needs a full-tunnel server.",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/devices/{{ _.device_id }}/config",
+      "body": {},
+      "parameters": [
+        {
+          "name": "kill_switch",
+          "value": "true",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 15.5,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
       "_id": "req_16",
       "_type": "request",
       "parentId": "fld_devices",
@@ -1120,12 +1146,12 @@
       "_type": "request",
       "parentId": "fld_servers",
       "name": "Create server (sized for 1000 devices)",
-      "description": "Needs servers:write. Deploys before it answers; the reply is the running server. max_devices picks the smallest free subnet that fits (a /22 here); send address instead to choose it yourself.",
+      "description": "Needs servers:write. Deploys before it answers; the reply is the running server. max_devices picks the smallest free subnet that fits (a /22 here); send address instead to choose it yourself. dns_on_server runs a caching resolver on the server that forwards to dns.",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/servers",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"name\": \"Tokyo\",\n  \"country\": \"JP\",\n  \"city\": \"Tokyo\",\n  \"max_devices\": 1000\n}"
+        "text": "{\n  \"name\": \"Tokyo\",\n  \"country\": \"JP\",\n  \"city\": \"Tokyo\",\n  \"max_devices\": 1000,\n  \"dns\": [\n    \"9.9.9.9\"\n  ],\n  \"dns_on_server\": true\n}"
       },
       "parameters": [],
       "headers": [
