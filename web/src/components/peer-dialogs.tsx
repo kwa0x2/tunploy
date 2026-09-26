@@ -17,8 +17,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { CopyButton } from "@/components/copy-button"
 import { FormField } from "@/components/form-field"
 import { ApiError, api, peerConfigUrl } from "@/lib/api"
-import type { Peer, PeerInput } from "@/lib/api"
-import { errorMessage, gib } from "@/lib/format"
+import type { LimitPeriod, Peer, PeerInput } from "@/lib/api"
+import { countedSince, errorMessage, formatBytes, formatDateTime, gib, periodTotal } from "@/lib/format"
 
 interface NameProps {
   open: boolean
@@ -133,6 +133,7 @@ const unitBytes: Record<Unit, number> = { MB: 1024 ** 2, GB: gib }
 interface Limits {
   size: string
   unit: Unit
+  period: LimitPeriod
   until: string
 }
 
@@ -149,11 +150,17 @@ function limitsOf(peer?: Peer): Limits {
   return {
     size: limit ? String(Number((limit / unitBytes[unit]).toFixed(2))) : "",
     unit,
+    period: peer?.limit_period ?? "monthly",
     until: peer?.expires_at ? dateInput(new Date(new Date(peer.expires_at).getTime() - 1)) : "",
   }
 }
 
-function limitsInput({ size: raw, unit, until }: Limits): Pick<PeerInput, "data_limit" | "expires_at"> | null {
+function limitsInput({
+  size: raw,
+  unit,
+  period,
+  until,
+}: Limits): Pick<PeerInput, "data_limit" | "limit_period" | "expires_at"> | null {
   const size = raw.trim() === "" ? 0 : Number(raw)
   if (!Number.isFinite(size) || size < 0) return null
   let expires: string | null = null
@@ -161,7 +168,7 @@ function limitsInput({ size: raw, unit, until }: Limits): Pick<PeerInput, "data_
     const [y, m, d] = until.split("-").map(Number)
     expires = new Date(y, m - 1, d + 1).toISOString()
   }
-  return { data_limit: Math.round(size * unitBytes[unit]), expires_at: expires }
+  return { data_limit: Math.round(size * unitBytes[unit]), limit_period: period, expires_at: expires }
 }
 
 function presetDate(days: number, months = 0) {
@@ -175,6 +182,11 @@ const presets = [
   { label: "1 month", date: () => presetDate(0, 1) },
 ]
 
+const periods: { value: LimitPeriod; label: string }[] = [
+  { value: "monthly", label: "Every month" },
+  { value: "total", label: "In total" },
+]
+
 function LimitFields({ value, onChange, error }: {
   value: Limits
   onChange: (value: Limits) => void
@@ -184,9 +196,13 @@ function LimitFields({ value, onChange, error }: {
     <>
       <FormField
         id="peer-limit"
-        label="Monthly data limit"
+        label="Data limit"
         error={error}
-        hint="Download and upload together. Resets on the 1st. Leave empty for no limit."
+        hint={
+          value.period === "monthly"
+            ? "Download and upload together. Starts again on the 1st. Leave empty for no limit."
+            : "Download and upload together. Counts until you reset the usage. Leave empty for no limit."
+        }
       >
         <div className="flex gap-1.5">
           <Input
@@ -214,6 +230,21 @@ function LimitFields({ value, onChange, error }: {
               </Button>
             ))}
           </div>
+        </div>
+        <div role="radiogroup" aria-label="Counted" className="flex flex-wrap gap-1.5">
+          {periods.map((p) => (
+            <Button
+              key={p.value}
+              type="button"
+              size="xs"
+              role="radio"
+              aria-checked={value.period === p.value}
+              variant={value.period === p.value ? "default" : "outline"}
+              onClick={() => onChange({ ...value, period: p.value })}
+            >
+              {p.label}
+            </Button>
+          ))}
         </div>
       </FormField>
       <FormField
@@ -273,8 +304,8 @@ export function PeerLimitsDialog({ peer, open, onOpenChange, onSaved }: LimitsPr
         <DialogHeader>
           <DialogTitle>Limits for {peer?.name}</DialogTitle>
           <DialogDescription>
-            When a limit is hit the device is disconnected until the next month or a later end
-            date. Its config keeps working after that.
+            When a limit is hit the device is disconnected until the limit starts again or a later
+            end date. Its config keeps working after that.
           </DialogDescription>
         </DialogHeader>
         {peer && (
@@ -305,6 +336,23 @@ function PeerLimitsForm({ peer, busy, setBusy, onDone, onCancel }: {
   const [limits, setLimits] = useState(() => limitsOf(peer))
   const [error, setError] = useState("")
 
+  // For plans that renew on their own date rather than on the 1st.
+  async function resetUsage() {
+    setError("")
+    setBusy(true)
+    try {
+      onDone({ peer: await api.resetPeerUsage(peer.instance_id, peer.id) })
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "apply_failed") {
+        onDone({ warning: err.message })
+        return
+      }
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     setError("")
@@ -330,6 +378,22 @@ function PeerLimitsForm({ peer, busy, setBusy, onDone, onCancel }: {
   return (
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
       <LimitFields value={limits} onChange={setLimits} error={error} />
+      <div className="bg-muted/50 flex flex-wrap items-center justify-between gap-2 rounded-lg p-3">
+        <p className="text-sm">
+          <span className="font-medium tabular-nums">{formatBytes(periodTotal(peer))}</span>{" "}
+          <span className="text-muted-foreground">
+            counted
+            {countedSince(peer)
+              ? ` since the reset on ${formatDateTime(countedSince(peer)!)}`
+              : peer.limit_period === "monthly"
+                ? " this month"
+                : " so far"}
+          </span>
+        </p>
+        <Button type="button" size="xs" variant="outline" disabled={busy} onClick={resetUsage}>
+          Reset usage
+        </Button>
+      </div>
       <DialogFooter>
         <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
           Cancel

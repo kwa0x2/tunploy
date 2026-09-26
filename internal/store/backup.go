@@ -16,11 +16,12 @@ var (
 )
 
 // Sessions would bring back logged-out logins; counters describe containers
-// that a restore rebuilds from scratch; stored API replies are only for retries.
-var notRestored = []string{"sessions", "wg_peer_counters", "api_idempotency"}
+// that a restore rebuilds from scratch; stored API replies are only for
+// retries; webhook deliveries would send old events again.
+var notRestored = []string{"sessions", "wg_peer_counters", "api_idempotency", "webhook_deliveries"}
 
 // Snapshot writes a consistent copy of the database to path, without sessions
-// or stored API replies, which can hold private keys.
+// or stored API replies, which can hold private keys, or webhook deliveries.
 func (s *Store) Snapshot(ctx context.Context, path string) error {
 	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path); err != nil {
 		return fmt.Errorf("snapshot database: %w", err)
@@ -30,7 +31,7 @@ func (s *Store) Snapshot(ctx context.Context, path string) error {
 		return err
 	}
 	defer db.Close()
-	for _, t := range []string{"sessions", "api_idempotency"} {
+	for _, t := range []string{"sessions", "api_idempotency", "webhook_deliveries"} {
 		if _, err := db.ExecContext(ctx, `DELETE FROM `+t); err != nil {
 			return fmt.Errorf("snapshot database: %w", err)
 		}

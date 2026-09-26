@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
@@ -31,6 +32,8 @@ type instanceRequest struct {
 	MTU                 *int      `json:"mtu"`
 	PersistentKeepalive *int      `json:"persistent_keepalive"`
 	ClientAllowedIPs    *[]string `json:"client_allowed_ips"`
+	Country             *string   `json:"country"`
+	City                *string   `json:"city"`
 }
 
 type instanceView struct {
@@ -90,6 +93,9 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	fields := req.apply(&in)
+	if req.Country == nil {
+		in.Country = s.hostCountry(r.Context(), in.Endpoint)
+	}
 	if req.Address != nil {
 		if other := overlapping(existing, in.Address); other != nil {
 			fields["address"] = fmt.Sprintf("subnet overlaps with %q (%s)", other.Name, other.Subnet())
@@ -194,6 +200,7 @@ func (s *Server) handleInstanceDefaults(w http.ResponseWriter, r *http.Request) 
 		MTU:                 in.MTU,
 		PersistentKeepalive: in.PersistentKeepalive,
 		ClientAllowedIPs:    in.ClientAllowedIPs,
+		Country:             s.hostCountry(r.Context(), in.Endpoint),
 	})
 }
 
@@ -205,6 +212,32 @@ type instanceDefaults struct {
 	MTU                 int            `json:"mtu"`
 	PersistentKeepalive int            `json:"persistent_keepalive"`
 	ClientAllowedIPs    []netip.Prefix `json:"client_allowed_ips"`
+	// Guessed from the endpoint; empty when it cannot be.
+	Country string `json:"country"`
+}
+
+// hostCountry guesses where a server is from its endpoint, for location lists.
+func (s *Server) hostCountry(ctx context.Context, host string) string {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return s.geo.Country(addr)
+	}
+	if s.geo == nil || !wg.ValidHost(host) {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	addrs, err := s.lookupHost(ctx, host)
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		if addr, err := netip.ParseAddr(a); err == nil {
+			if c := s.geo.Country(addr); c != "" {
+				return c
+			}
+		}
+	}
+	return ""
 }
 
 // Subnets stay apart across nodes too, so a client can hold configs for
@@ -384,6 +417,12 @@ func (req instanceRequest) apply(in *wg.Instance) map[string]string {
 			fields["client_allowed_ips"] = "client allowed IPs must be a list of CIDR ranges"
 		}
 		in.ClientAllowedIPs = prefixes
+	}
+	if req.Country != nil {
+		in.Country = strings.ToUpper(strings.TrimSpace(*req.Country))
+	}
+	if req.City != nil {
+		in.City = strings.TrimSpace(*req.City)
 	}
 	return fields
 }

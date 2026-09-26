@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,25 +33,65 @@ const (
 
 var apiEventFamilies = []string{"device", "server", "node"}
 
+type apiEndpoint struct {
+	pattern string
+	scope   string
+	h       httpx.Handler
+	// Replays a retried request's first reply; see idempotent.
+	idempotent bool
+}
+
+// The table openapi.json is checked against.
+func (s *Server) apiEndpoints() []apiEndpoint {
+	return []apiEndpoint{
+		{"GET /api/v1/devices", scopeDevicesRead, s.apiListDevices, false},
+		{"POST /api/v1/devices", scopeDevicesWrite, s.apiCreateDevice, true},
+		{"GET /api/v1/devices/{id}", scopeDevicesRead, s.apiGetDevice, false},
+		{"PATCH /api/v1/devices/{id}", scopeDevicesWrite, s.apiUpdateDevice, false},
+		{"DELETE /api/v1/devices/{id}", scopeDevicesWrite, s.apiDeleteDevice, false},
+		{"GET /api/v1/devices/{id}/config", scopeDevicesRead, s.apiDeviceConfig, false},
+		{"GET /api/v1/devices/{id}/usage", scopeDevicesRead, s.apiDeviceUsage, false},
+		{"POST /api/v1/devices/{id}/usage/reset", scopeDevicesWrite, s.apiResetDeviceUsage, true},
+
+		{"GET /api/v1/servers", scopeServersRead, s.apiListServers, false},
+		{"GET /api/v1/servers/{id}", scopeServersRead, s.apiGetServer, false},
+
+		{"GET /api/v1/events", scopeEventsRead, s.apiListEvents, false},
+
+		{"GET /api/v1/webhooks", scopeWebhooksWrite, s.apiListWebhooks, false},
+		{"POST /api/v1/webhooks", scopeWebhooksWrite, s.handleCreateWebhook, true},
+		{"GET /api/v1/webhooks/{id}", scopeWebhooksWrite, s.handleGetWebhook, false},
+		{"PATCH /api/v1/webhooks/{id}", scopeWebhooksWrite, s.handleUpdateWebhook, false},
+		{"DELETE /api/v1/webhooks/{id}", scopeWebhooksWrite, s.handleDeleteWebhook, false},
+		{"POST /api/v1/webhooks/{id}/ping", scopeWebhooksWrite, s.handlePingWebhook, false},
+		{"GET /api/v1/webhooks/{id}/deliveries", scopeWebhooksWrite, s.handleListDeliveries, false},
+		{"POST /api/v1/webhooks/{id}/deliveries/{deliveryID}/retry", scopeWebhooksWrite, s.handleRetryDelivery, false},
+	}
+}
+
 func (s *Server) apiRoutes() http.Handler {
 	v1 := http.NewServeMux()
-	v1.Handle("GET /api/v1/devices", requireScope(scopeDevicesRead, s.apiListDevices))
-	v1.Handle("POST /api/v1/devices", s.idempotent(requireScope(scopeDevicesWrite, s.apiCreateDevice)))
-	v1.Handle("GET /api/v1/devices/{id}", requireScope(scopeDevicesRead, s.apiGetDevice))
-	v1.Handle("PATCH /api/v1/devices/{id}", requireScope(scopeDevicesWrite, s.apiUpdateDevice))
-	v1.Handle("DELETE /api/v1/devices/{id}", requireScope(scopeDevicesWrite, s.apiDeleteDevice))
-	v1.Handle("GET /api/v1/devices/{id}/config", requireScope(scopeDevicesRead, s.apiDeviceConfig))
-	v1.Handle("GET /api/v1/devices/{id}/usage", requireScope(scopeDevicesRead, s.apiDeviceUsage))
-
-	v1.Handle("GET /api/v1/servers", requireScope(scopeServersRead, s.apiListServers))
-	v1.Handle("GET /api/v1/servers/{id}", requireScope(scopeServersRead, s.apiGetServer))
-
-	v1.Handle("GET /api/v1/events", requireScope(scopeEventsRead, s.apiListEvents))
-
+	for _, e := range s.apiEndpoints() {
+		h := requireScope(e.scope, e.h)
+		if e.idempotent {
+			h = s.idempotent(h)
+		}
+		v1.Handle(e.pattern, h)
+	}
 	v1.Handle("/api/v1/", httpx.Handler(func(w http.ResponseWriter, r *http.Request) error {
 		return httpx.NotFound("no such endpoint: %s %s", r.Method, r.URL.Path)
 	}))
 	return chain(v1, s.requireAPIKey)
+}
+
+//go:embed openapi.json
+var openAPISpec []byte
+
+// Public, so tools can fetch it before anyone has a key.
+func handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Write(openAPISpec)
 }
 
 type page[T any] struct {
@@ -82,9 +124,14 @@ type apiDevice struct {
 	// As of the watcher's last look, at most ten seconds old.
 	Online        bool       `json:"online"`
 	LastHandshake *time.Time `json:"last_handshake"`
-	// Bytes per calendar month, both directions; 0 means no limit.
-	DataLimit  int64      `json:"data_limit"`
-	ExpiresAt  *time.Time `json:"expires_at"`
+	// Bytes per limit period, both directions; 0 means no limit.
+	DataLimit   int64          `json:"data_limit"`
+	LimitPeriod wg.LimitPeriod `json:"limit_period"`
+	// What counts toward the limit: this period, or since the last reset.
+	PeriodUsage  apiTraffic `json:"period_usage"`
+	UsageResetAt *time.Time `json:"usage_reset_at"`
+	ExpiresAt    *time.Time `json:"expires_at"`
+	// The calendar month, whatever the limit period.
 	MonthUsage apiTraffic `json:"month_usage"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
@@ -93,14 +140,15 @@ type apiDevice struct {
 }
 
 type apiDeviceRequest struct {
-	ServerID   *int64                    `json:"server_id"`
-	Name       *string                   `json:"name"`
-	PublicKey  *string                   `json:"public_key"`
-	ExternalID *string                   `json:"external_id"`
-	Metadata   optional[json.RawMessage] `json:"metadata"`
-	Enabled    *bool                     `json:"enabled"`
-	DataLimit  *int64                    `json:"data_limit"`
-	ExpiresAt  optional[time.Time]       `json:"expires_at"`
+	ServerID    *int64                    `json:"server_id"`
+	Name        *string                   `json:"name"`
+	PublicKey   *string                   `json:"public_key"`
+	ExternalID  *string                   `json:"external_id"`
+	Metadata    optional[json.RawMessage] `json:"metadata"`
+	Enabled     *bool                     `json:"enabled"`
+	DataLimit   *int64                    `json:"data_limit"`
+	LimitPeriod *wg.LimitPeriod           `json:"limit_period"`
+	ExpiresAt   optional[time.Time]       `json:"expires_at"`
 }
 
 func (req apiDeviceRequest) apply(p *wg.Peer) map[string]string {
@@ -128,6 +176,12 @@ func (req apiDeviceRequest) apply(p *wg.Peer) map[string]string {
 	if req.DataLimit != nil {
 		p.DataLimit = *req.DataLimit
 	}
+	if req.LimitPeriod != nil {
+		p.LimitPeriod = *req.LimitPeriod
+		if p.LimitPeriod == "" {
+			fields["limit_period"] = "limit_period must be monthly or total"
+		}
+	}
 	if req.ExpiresAt.Set {
 		p.ExpiresAt = req.ExpiresAt.Value
 	}
@@ -141,6 +195,10 @@ func (s *Server) apiDevices(ctx context.Context, peers []wg.Peer) ([]apiDevice, 
 		ids[i] = p.ID
 	}
 	usage, err := s.store.PeersMonthUsage(ctx, ids, now)
+	if err != nil {
+		return nil, err
+	}
+	used, err := s.store.PeersLimitUsage(ctx, ids, now)
 	if err != nil {
 		return nil, err
 	}
@@ -164,10 +222,13 @@ func (s *Server) apiDevices(ctx context.Context, peers []wg.Peer) ([]apiDevice, 
 			PublicKey:     p.PublicKey,
 			ClientKey:     p.KeyOnClient(),
 			Enabled:       p.Enabled,
-			Status:        store.DeviceStatus(p, usage[p.ID], now),
+			Status:        store.DeviceStatus(p, used[p.ID], now),
 			Online:        online[p.InstanceID][p.PublicKey],
 			LastHandshake: p.LastHandshake,
 			DataLimit:     p.DataLimit,
+			LimitPeriod:   p.LimitPeriod,
+			PeriodUsage:   newAPITraffic(used[p.ID]),
+			UsageResetAt:  p.UsageResetAt,
 			ExpiresAt:     p.ExpiresAt,
 			MonthUsage:    newAPITraffic(usage[p.ID]),
 			CreatedAt:     p.CreatedAt,
@@ -369,10 +430,13 @@ func (s *Server) apiDeviceConfig(w http.ResponseWriter, r *http.Request) error {
 }
 
 type apiUsage struct {
-	MonthUsage apiTraffic         `json:"month_usage"`
-	DataLimit  int64              `json:"data_limit"`
-	Daily      []store.UsagePoint `json:"daily"`
-	Monthly    []store.UsagePoint `json:"monthly"`
+	MonthUsage   apiTraffic         `json:"month_usage"`
+	PeriodUsage  apiTraffic         `json:"period_usage"`
+	DataLimit    int64              `json:"data_limit"`
+	LimitPeriod  wg.LimitPeriod     `json:"limit_period"`
+	UsageResetAt *time.Time         `json:"usage_reset_at"`
+	Daily        []store.UsagePoint `json:"daily"`
+	Monthly      []store.UsagePoint `json:"monthly"`
 }
 
 func (s *Server) apiDeviceUsage(w http.ResponseWriter, r *http.Request) error {
@@ -385,12 +449,36 @@ func (s *Server) apiDeviceUsage(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	used, err := s.store.PeersLimitUsage(r.Context(), []int64{p.ID}, now)
+	if err != nil {
+		return err
+	}
 	return httpx.JSON(w, http.StatusOK, apiUsage{
-		MonthUsage: newAPITraffic(monthly[len(monthly)-1].Traffic),
-		DataLimit:  p.DataLimit,
-		Daily:      daily,
-		Monthly:    monthly,
+		MonthUsage:   newAPITraffic(monthly[len(monthly)-1].Traffic),
+		PeriodUsage:  newAPITraffic(used[p.ID]),
+		DataLimit:    p.DataLimit,
+		LimitPeriod:  p.LimitPeriod,
+		UsageResetAt: p.UsageResetAt,
+		Daily:        daily,
+		Monthly:      monthly,
 	})
+}
+
+// For plans that renew on their own date: reset on renewal, with a total limit.
+func (s *Server) apiResetDeviceUsage(w http.ResponseWriter, r *http.Request) error {
+	in, p, err := s.deviceFromPath(r)
+	if err != nil {
+		return err
+	}
+	reset, err := s.resetPeerUsage(r.Context(), in, p)
+	if err != nil {
+		return err
+	}
+	view, err := s.apiDevice(r.Context(), reset)
+	if err != nil {
+		return err
+	}
+	return httpx.JSON(w, http.StatusOK, view)
 }
 
 func (s *Server) deviceFromPath(r *http.Request) (*wg.Instance, *wg.Peer, error) {
@@ -421,6 +509,8 @@ type apiServer struct {
 	ID         int64        `json:"id"`
 	Name       string       `json:"name"`
 	Node       apiNode      `json:"node"`
+	Country    string       `json:"country"`
+	City       string       `json:"city"`
 	Status     string       `json:"status"`
 	Endpoint   string       `json:"endpoint"`
 	ListenPort int          `json:"listen_port"`
@@ -454,6 +544,8 @@ func (s *Server) apiServers(ctx context.Context, instances []wg.Instance) ([]api
 			ID:          in.ID,
 			Name:        in.Name,
 			Node:        apiNode{ID: in.NodeID, Name: names[in.NodeID]},
+			Country:     in.Country,
+			City:        in.City,
 			Status:      string(statuses[in.ID].State),
 			Endpoint:    in.Endpoint,
 			ListenPort:  in.ListenPort,
@@ -473,10 +565,14 @@ func capacity(subnet netip.Prefix) int {
 	return 1<<(32-subnet.Bits()) - 3
 }
 
+// Few enough to list whole; country narrows them to one location.
 func (s *Server) apiListServers(w http.ResponseWriter, r *http.Request) error {
 	instances, err := s.store.Instances(r.Context())
 	if err != nil {
 		return err
+	}
+	if country := r.URL.Query().Get("country"); country != "" {
+		instances = slices.DeleteFunc(instances, func(in wg.Instance) bool { return !strings.EqualFold(in.Country, country) })
 	}
 	views, err := s.apiServers(r.Context(), instances)
 	if err != nil {
@@ -552,13 +648,18 @@ func (s *Server) apiListEvents(w http.ResponseWriter, r *http.Request) error {
 	}
 	out := make([]apiEvent, len(events))
 	for i, e := range events {
-		out[i] = apiEvent{
-			ID: e.ID, Kind: e.Kind, CreatedAt: e.CreatedAt,
-			ServerID: e.InstanceID, ServerName: e.InstanceName, DeviceID: e.PeerID, DeviceName: e.PeerName,
-			NodeName: e.NodeName, IP: e.IP, Country: e.Country, Detail: e.Detail, Actor: e.Actor,
-		}
+		out[i] = newAPIEvent(e)
 	}
 	return httpx.JSON(w, http.StatusOK, page[apiEvent]{Data: out, HasMore: more})
+}
+
+// Webhooks send the same shape, so a receiver can use either.
+func newAPIEvent(e store.Event) apiEvent {
+	return apiEvent{
+		ID: e.ID, Kind: e.Kind, CreatedAt: e.CreatedAt.UTC().Truncate(time.Second),
+		ServerID: e.InstanceID, ServerName: e.InstanceName, DeviceID: e.PeerID, DeviceName: e.PeerName,
+		NodeName: e.NodeName, IP: e.IP, Country: e.Country, Detail: e.Detail, Actor: e.Actor,
+	}
 }
 
 func queryID(raw, name string) (int64, error) {

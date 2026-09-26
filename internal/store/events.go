@@ -49,20 +49,20 @@ const (
 	authKinds       = `kind LIKE 'auth.%'`
 )
 
-func (s *Store) AddEvent(ctx context.Context, e Event) error {
+func (s *Store) AddEvent(ctx context.Context, e Event) (int64, error) {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now()
 	}
-	_, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO events (created_at, kind, instance_id, instance_name, peer_id, peer_name, node_name, ip, country,
 			detail, actor)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.CreatedAt.Unix(), e.Kind, nullID(e.InstanceID), e.InstanceName, nullID(e.PeerID), e.PeerName, e.NodeName,
 		e.IP, e.Country, e.Detail, e.Actor)
 	if err != nil {
-		return fmt.Errorf("add event: %w", err)
+		return 0, fmt.Errorf("add event: %w", err)
 	}
-	return nil
+	return res.LastInsertId()
 }
 
 func (s *Store) Events(ctx context.Context, f EventFilter) ([]Event, error) {

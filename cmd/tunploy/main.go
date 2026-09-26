@@ -44,6 +44,7 @@ commands:
 const (
 	peerWatchInterval = 10 * time.Second
 	eventRetention    = 90 * 24 * time.Hour
+	deliveryRetention = 30 * 24 * time.Hour
 )
 
 func main() {
@@ -137,6 +138,7 @@ func run() error {
 	}
 	go mgr.Watch(ctx, peerWatchInterval)
 	go handler.RunNotifications(ctx)
+	go handler.RunWebhooks(ctx)
 	go handler.RunBackups(ctx)
 	go updates.Run(ctx)
 	go housekeeping(ctx, st)
@@ -272,6 +274,9 @@ func housekeeping(ctx context.Context, st *store.Store) {
 		}
 		if _, err := st.DeleteIdempotencyKeysBefore(ctx, time.Now().Add(-store.IdempotencyTTL)); err != nil {
 			slog.Error("purge idempotency keys", "error", err)
+		}
+		if _, err := st.DeleteDeliveriesBefore(ctx, time.Now().Add(-deliveryRetention)); err != nil {
+			slog.Error("purge webhook deliveries", "error", err)
 		}
 	}
 }

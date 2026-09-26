@@ -36,6 +36,7 @@ func toneOf(kind string) tone {
 		return toneLimit
 	}
 	if strings.HasPrefix(kind, "auth.") || strings.HasPrefix(kind, "settings.") ||
+		strings.HasPrefix(kind, "apikey.") || strings.HasPrefix(kind, "webhook.") ||
 		kind == "backup.downloaded" || kind == "backup.restored" {
 		return toneSecurity
 	}

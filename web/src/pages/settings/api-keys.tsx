@@ -39,6 +39,7 @@ const scopes: { id: ApiScope; label: string; hint: string }[] = [
   { id: "devices:write", label: "Manage devices", hint: "Create, change, disable and delete devices" },
   { id: "servers:read", label: "Read servers", hint: "List servers, their status and free space" },
   { id: "events:read", label: "Read events", hint: "Connections and changes to devices, servers and nodes" },
+  { id: "webhooks:write", label: "Manage webhooks", hint: "Add, change and remove webhooks, and see their deliveries" },
 ]
 
 const expiries = [
@@ -186,6 +187,13 @@ function UsageCard() {
             first reply instead of making a second device.
           </p>
         </div>
+        <p className="text-muted-foreground text-xs">
+          Every endpoint is described in{" "}
+          <a href="/api/v1/openapi.json" target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">
+            openapi.json
+          </a>
+          , ready for Postman, Insomnia or a client generator.
+        </p>
         <Alert>
           <TriangleAlert />
           <AlertDescription>

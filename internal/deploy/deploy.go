@@ -91,7 +91,8 @@ type PeerBlock struct {
 	Peer       wg.Peer
 	// Empty when the peer may connect again.
 	Reason wg.Block
-	Month  wg.Traffic
+	// What counted toward the limit.
+	Used wg.Traffic
 }
 
 func New(st *store.Store, dk Docker, dataDir, prefix string) (*Manager, error) {
@@ -625,7 +626,7 @@ func (m *Manager) enforceLimits(ctx context.Context, h Host, in *wg.Instance) er
 	}
 	for _, p := range peers {
 		if prev[p.ID] != next[p.ID] {
-			m.onPeerBlock(PeerBlock{InstanceID: in.ID, Peer: p, Reason: next[p.ID], Month: usage[p.ID]})
+			m.onPeerBlock(PeerBlock{InstanceID: in.ID, Peer: p, Reason: next[p.ID], Used: usage[p.ID]})
 		}
 	}
 	return nil
@@ -637,7 +638,7 @@ func (m *Manager) blockedPeers(ctx context.Context, instanceID int64) ([]wg.Peer
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	usage, err := m.store.MonthUsage(ctx, instanceID, now)
+	usage, err := m.store.LimitUsage(ctx, instanceID, now)
 	if err != nil {
 		return nil, nil, nil, err
 	}

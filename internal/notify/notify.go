@@ -30,11 +30,12 @@ var Groups = []Group{
 	{ID: "servers", Kinds: []string{"server.created", "server.deploy_failed", "server.deleted", "server.down", "server.recovered",
 		"node.added", "node.deleted", "node.offline", "node.online"}},
 	{ID: "devices", Kinds: []string{"device.created", "device.deleted", "device.enabled", "device.disabled"}},
-	{ID: "limits", Kinds: []string{"device.limit_reached", "device.expired", "device.unblocked"}},
+	{ID: "limits", Kinds: []string{"device.limit_reached", "device.expired", "device.unblocked", "device.usage_reset"}},
 	{ID: "failed_logins", Kinds: []string{"auth.login_failed"}},
 	{ID: "security", Kinds: []string{"auth.password_changed", "auth.totp_enabled", "auth.totp_disabled",
 		"settings.domain_changed", "settings.notifications_changed", "settings.backups_changed",
-		"backup.downloaded", "backup.restored", "apikey.created", "apikey.revoked"}},
+		"backup.downloaded", "backup.restored", "apikey.created", "apikey.revoked",
+		"webhook.created", "webhook.updated", "webhook.deleted"}},
 	{ID: "backups", Kinds: []string{"backup.failed"}},
 	{ID: "logins", Kinds: []string{"auth.login"}},
 	{ID: "connections", Kinds: []string{"device.connected", "device.disconnected"}},
@@ -272,6 +273,8 @@ func Describe(e store.Event) string {
 		return "Access for " + device + " on " + server + " ended"
 	case "device.unblocked":
 		return device + " can connect to " + server + " again"
+	case "device.usage_reset":
+		return "Data usage was reset for " + device + " on " + server
 	case "server.created":
 		return "Server " + server + " was created"
 	case "server.deploy_failed":
@@ -338,6 +341,12 @@ func Describe(e store.Event) string {
 		return "An API key was created"
 	case "apikey.revoked":
 		return "An API key was revoked"
+	case "webhook.created":
+		return "A webhook was added"
+	case "webhook.updated":
+		return "A webhook was changed"
+	case "webhook.deleted":
+		return "A webhook was removed"
 	}
 	return e.Kind
 }

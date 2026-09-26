@@ -1,6 +1,6 @@
 import { Smartphone } from "lucide-react"
 import type { InstanceState, NodeState, Peer, PeerBlock } from "@/lib/api"
-import { countryFlag, countryName, formatBytes, monthTotal } from "@/lib/format"
+import { countryFlag, countryName, formatBytes, monthTotal, periodTotal } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const states: Record<InstanceState, { label: string; tone: string; dot: string }> = {
@@ -119,13 +119,16 @@ export function MonthUsage({ peer }: { peer: Peer }) {
       </span>
     )
   }
+  // The bar follows the limit, which may count past this month.
+  const counted = periodTotal(peer)
+  const per = peer.limit_period === "total" ? " in total" : ""
   return (
-    <div className="w-28 space-y-1" title={title}>
+    <div className="w-28 space-y-1" title={`${title}\nCounted toward the limit: ${formatBytes(counted)}`}>
       <p className="text-xs whitespace-nowrap tabular-nums">
-        {formatBytes(total)}
-        <span className="text-muted-foreground"> / {formatBytes(peer.data_limit)}</span>
+        {formatBytes(counted)}
+        <span className="text-muted-foreground"> / {formatBytes(peer.data_limit)}{per}</span>
       </p>
-      <UsageMeter used={total} limit={peer.data_limit} />
+      <UsageMeter used={counted} limit={peer.data_limit} />
     </div>
   )
 }

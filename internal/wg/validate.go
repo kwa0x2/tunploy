@@ -16,6 +16,7 @@ const (
 	minMTU        = 1280
 	maxMTU        = 1500
 
+	maxCityLength       = 64
 	maxExternalIDLength = 255
 	maxMetadataBytes    = 4096
 )
@@ -73,6 +74,16 @@ func (in Instance) Validate() map[string]string {
 		}
 	}
 
+	if in.Country != "" && !validCountry(in.Country) {
+		fields["country"] = "country must be a two-letter ISO 3166 code such as DE"
+	}
+	switch {
+	case utf8.RuneCountInString(in.City) > maxCityLength:
+		fields["city"] = "city must be at most 64 characters"
+	case strings.IndexFunc(in.City, unicode.IsControl) >= 0:
+		fields["city"] = "city must not contain control characters"
+	}
+
 	return fields
 }
 
@@ -83,6 +94,9 @@ func (p Peer) Validate() map[string]string {
 	}
 	if p.DataLimit < 0 {
 		fields["data_limit"] = "data limit must be 0 (no limit) or more"
+	}
+	if p.LimitPeriod != "" && !p.LimitPeriod.Valid() {
+		fields["limit_period"] = "limit_period must be monthly or total"
 	}
 	switch {
 	case len(p.ExternalID) > maxExternalIDLength:
@@ -99,6 +113,10 @@ func (p Peer) Validate() map[string]string {
 		}
 	}
 	return fields
+}
+
+func validCountry(c string) bool {
+	return len(c) == 2 && c[0] >= 'A' && c[0] <= 'Z' && c[1] >= 'A' && c[1] <= 'Z'
 }
 
 // A newline in a config comment would let a name smuggle in a PostUp line.

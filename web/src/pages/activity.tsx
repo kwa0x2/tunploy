@@ -31,6 +31,7 @@ import {
   Trash2,
   TriangleAlert,
   Unplug,
+  Webhook,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -192,6 +193,8 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: CalendarX, tone: "bad", text: <>Access for {device} on {server} ended</> }
     case "device.unblocked":
       return { icon: Plug, tone: "good", text: <>{device} can connect to {server} again</> }
+    case "device.usage_reset":
+      return { icon: RotateCw, tone: "good", text: <>Data usage reset for {device} on {server}</> }
     case "device.renamed":
       return { icon: Pencil, tone: "neutral", text: <>Device renamed to {device} on {server}</> }
     case "server.created":
@@ -260,6 +263,12 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: ShieldOff, tone: "bad", text: "Two-factor authentication turned off" }
     case "apikey.created":
       return { icon: KeySquare, tone: "neutral", text: "API key created" }
+    case "webhook.created":
+      return { icon: Webhook, tone: "neutral", text: "Webhook added" }
+    case "webhook.updated":
+      return { icon: Webhook, tone: "neutral", text: "Webhook changed" }
+    case "webhook.deleted":
+      return { icon: Webhook, tone: "neutral", text: "Webhook removed" }
     case "apikey.revoked":
       return { icon: KeySquare, tone: "neutral", text: "API key revoked" }
     default:

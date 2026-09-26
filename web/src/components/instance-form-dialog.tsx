@@ -55,6 +55,8 @@ interface Values {
   mtu: string
   persistent_keepalive: string
   client_allowed_ips: string
+  country: string
+  city: string
 }
 
 const empty: Values = {
@@ -66,6 +68,8 @@ const empty: Values = {
   mtu: "",
   persistent_keepalive: "",
   client_allowed_ips: "",
+  country: "",
+  city: "",
 }
 
 function valuesOf(s: InstanceSettings & { name?: string }): Values {
@@ -78,6 +82,8 @@ function valuesOf(s: InstanceSettings & { name?: string }): Values {
     mtu: s.mtu ? String(s.mtu) : "",
     persistent_keepalive: String(s.persistent_keepalive),
     client_allowed_ips: s.client_allowed_ips.join(", "),
+    country: s.country,
+    city: s.city ?? "",
   }
 }
 
@@ -144,7 +150,7 @@ function InstanceForm(
       if (!/^\d+$/.test(raw)) errors[key] = "must be a whole number"
       else input[key] = Number(raw)
     }
-    const text = (key: "endpoint" | "address") => {
+    const text = (key: "endpoint" | "address" | "country" | "city") => {
       if (values[key].trim() !== "") input[key] = values[key].trim()
     }
     const list = (key: "dns" | "client_allowed_ips") => {
@@ -156,7 +162,12 @@ function InstanceForm(
     list("dns")
     if (isCreate) {
       text("address")
+      // Left out, the panel guesses the country from the endpoint.
+      text("country")
+      text("city")
     } else {
+      input.country = values.country.trim()
+      input.city = values.city.trim()
       int("mtu", 0)
       int("persistent_keepalive", 0)
       list("client_allowed_ips")
@@ -166,7 +177,7 @@ function InstanceForm(
 
   function showFieldErrors(fields: Record<string, string>) {
     setFieldErrors(fields)
-    const hidden = ["endpoint", "listen_port", "address", "dns"].some((f) => f in fields)
+    const hidden = ["endpoint", "listen_port", "address", "dns", "country", "city"].some((f) => f in fields)
     if (hidden) setAdvanced(true)
   }
 
@@ -345,6 +356,27 @@ function InstanceForm(
                 onChange={set("address")}
                 disabled={!isCreate}
                 aria-invalid={Boolean(fieldErrors.address)}
+              />
+            </FormField>
+          </div>
+          <div className="grid grid-cols-[6rem_1fr] gap-4">
+            <FormField id="country" label="Country" error={fieldErrors.country}>
+              <Input
+                id="country"
+                maxLength={2}
+                placeholder={defaults?.country || "DE"}
+                value={values.country}
+                onChange={(e) => setValues((v) => ({ ...v, country: e.target.value.toUpperCase() }))}
+                aria-invalid={Boolean(fieldErrors.country)}
+              />
+            </FormField>
+            <FormField id="city" label="City" error={fieldErrors.city}>
+              <Input
+                id="city"
+                placeholder="Frankfurt"
+                value={values.city}
+                onChange={set("city")}
+                aria-invalid={Boolean(fieldErrors.city)}
               />
             </FormField>
           </div>

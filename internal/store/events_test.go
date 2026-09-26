@@ -21,7 +21,7 @@ func TestEvents(t *testing.T) {
 		{Kind: "server.created", InstanceID: 1, InstanceName: "Home"},
 		{Kind: "device.connected", InstanceID: 1, PeerID: 2, PeerName: "phone", Country: "TR"},
 	} {
-		if err := st.AddEvent(ctx, e); err != nil {
+		if _, err := st.AddEvent(ctx, e); err != nil {
 			t.Fatal(err)
 		}
 	}

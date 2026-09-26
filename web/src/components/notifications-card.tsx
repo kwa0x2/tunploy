@@ -28,9 +28,9 @@ const securities: { value: SMTPSecurity; label: string; port: number }[] = [
 const groups: { id: NotificationGroup; label: string; hint: string }[] = [
   { id: "servers", label: "Servers", hint: "Created, deleted, failed to deploy, went down or came back; nodes added, removed or offline." },
   { id: "devices", label: "Devices", hint: "Added, removed, enabled or disabled." },
-  { id: "limits", label: "Data limits and access", hint: "A device used up its data, its access ended, or it may connect again." },
+  { id: "limits", label: "Data limits and access", hint: "A device used up its data, its access ended, its usage was reset, or it may connect again." },
   { id: "failed_logins", label: "Failed sign-ins", hint: "Someone tried a wrong password or code." },
-  { id: "security", label: "Security changes", hint: "Password, two-factor, domain, email or backup settings changed, or a backup was downloaded or restored." },
+  { id: "security", label: "Security changes", hint: "Password, two-factor, domain, email or backup settings changed, an API key or webhook was added or removed, or a backup was downloaded or restored." },
   { id: "backups", label: "Backup failures", hint: "A scheduled backup to S3 could not be made." },
   { id: "logins", label: "Successful sign-ins", hint: "Every time someone signs in to the panel." },
   { id: "connections", label: "Connections", hint: "Each time a device connects or disconnects. Can be many emails a day." },

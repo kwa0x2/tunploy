@@ -58,7 +58,7 @@ export function PeersPage() {
                     <TableHead>Address</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Location</TableHead>
-                    <TableHead>This month</TableHead>
+                    <TableHead title="This month, or toward the data limit when a device has one">Usage</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

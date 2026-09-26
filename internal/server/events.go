@@ -78,10 +78,16 @@ func (s *Server) record(ctx context.Context, e store.Event) {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now()
 	}
-	if err := s.store.AddEvent(context.WithoutCancel(ctx), e); err != nil {
+	id, err := s.store.AddEvent(context.WithoutCancel(ctx), e)
+	if err != nil {
 		slog.Error("record event", "kind", e.Kind, "error", err)
 	}
 	s.notifier.Notify(e)
+	// Without an ID a receiver could not tell it from the events API.
+	if err == nil {
+		e.ID = id
+		s.queueWebhooks(ctx, e)
+	}
 }
 
 func instanceEvent(kind string, in *wg.Instance) store.Event {
@@ -132,7 +138,8 @@ func (s *Server) peerBlocked(b deploy.PeerBlock) {
 	switch b.Reason {
 	case wg.BlockLimit:
 		e = peerEvent("device.limit_reached", in, &b.Peer)
-		e.Detail = fmt.Sprintf("used %s of %s this month", formatBytes(b.Month.Total()), formatBytes(b.Peer.DataLimit))
+		e.Detail = fmt.Sprintf("used %s of %s %s", formatBytes(b.Used.Total()), formatBytes(b.Peer.DataLimit),
+			periodText(b.Peer))
 	case wg.BlockExpired:
 		e = peerEvent("device.expired", in, &b.Peer)
 	default:

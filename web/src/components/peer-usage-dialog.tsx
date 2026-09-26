@@ -14,7 +14,16 @@ import { UsageMeter } from "@/components/status"
 import { useResource } from "@/hooks/use-resource"
 import { api } from "@/lib/api"
 import type { Peer, UsagePoint } from "@/lib/api"
-import { errorMessage, formatBytes, formatExpiry, monthTotal, nextMonthStart } from "@/lib/format"
+import {
+  countedSince,
+  errorMessage,
+  formatBytes,
+  formatDateTime,
+  formatExpiry,
+  monthTotal,
+  nextMonthStart,
+  periodTotal,
+} from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -46,28 +55,37 @@ function PeerUsageBody({ peer, onEditLimits }: { peer: Peer; onEditLimits: () =>
     useCallback(() => api.peerUsage(peer.instance_id, peer.id), [peer.instance_id, peer.id]),
     30_000,
   )
-  const used = monthTotal(peer)
+  const month = monthTotal(peer)
+  const used = periodTotal(peer)
+  const monthly = peer.limit_period === "monthly"
   const resets = nextMonthStart().toLocaleDateString(undefined, { day: "numeric", month: "short" })
+  const since = countedSince(peer)
+  const left = `${formatBytes(Math.max(0, peer.data_limit - used))} left`
 
   return (
     <div className="min-w-0 space-y-5">
       <dl className="grid gap-3 sm:grid-cols-3">
         <Figure label="This month">
-          <dd className="text-xl font-semibold tracking-tight">{formatBytes(used)}</dd>
+          <dd className="text-xl font-semibold tracking-tight">{formatBytes(month)}</dd>
           <dd className="text-muted-foreground text-xs tabular-nums">
             ↓ {formatBytes(peer.month_usage.tx_bytes)} · ↑ {formatBytes(peer.month_usage.rx_bytes)}
           </dd>
         </Figure>
-        <Figure label="Monthly limit" action={<EditLink onClick={onEditLimits} />}>
+        <Figure label={monthly ? "Monthly limit" : "Total limit"} action={<EditLink onClick={onEditLimits} />}>
           {peer.data_limit ? (
             <>
               <dd className="text-xl font-semibold tracking-tight">{formatBytes(peer.data_limit)}</dd>
               <dd className="space-y-1.5">
                 <UsageMeter used={used} limit={peer.data_limit} className="mt-1" />
                 <p className="text-muted-foreground text-xs">
-                  {used >= peer.data_limit
-                    ? `Used up, back on ${resets}`
-                    : `${formatBytes(peer.data_limit - used)} left · resets ${resets}`}
+                  {monthly
+                    ? used >= peer.data_limit
+                      ? `Used up, back on ${resets}`
+                      : `${left} · resets ${resets}`
+                    : used >= peer.data_limit
+                      ? "Used up until the usage is reset"
+                      : left}
+                  {since && ` · counted since ${formatDateTime(since)}`}
                 </p>
               </dd>
             </>

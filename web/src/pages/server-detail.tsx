@@ -53,7 +53,15 @@ import { useResource } from "@/hooks/use-resource"
 import { useTarget } from "@/hooks/use-target"
 import { ApiError, api, peerConfigUrl } from "@/lib/api"
 import type { Instance, Peer } from "@/lib/api"
-import { endpointHost, endpointOf, errorMessage, formatRelative, isOnline, lastSeen } from "@/lib/format"
+import {
+  endpointHost,
+  endpointOf,
+  errorMessage,
+  formatRelative,
+  isOnline,
+  lastSeen,
+  locationText,
+} from "@/lib/format"
 
 const pollMs = 5_000
 
@@ -159,6 +167,7 @@ function ServerDetail({ id }: { id: number }) {
                 {node.name}
               </Link>
             )}
+            {locationText(current) && <span className="text-xs">{locationText(current)}</span>}
           </span>
         }
         actions={
@@ -383,7 +392,7 @@ function PeersCard({ instance, peers, error, reload }: {
                 <TableHead>Address</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Location</TableHead>
-                <TableHead>This month</TableHead>
+                <TableHead title="This month, or toward the data limit when a device has one">Usage</TableHead>
                 <TableHead>Enabled</TableHead>
                 <TableHead className="w-0" />
               </TableRow>

@@ -69,7 +69,7 @@ func TestWatchEnforcesLimits(t *testing.T) {
 
 	rx = 1000
 	watch()
-	if len(blocks) != 1 || blocks[0].Peer.ID != capped.ID || blocks[0].Reason != wg.BlockLimit || blocks[0].Month.RxBytes != 1000 {
+	if len(blocks) != 1 || blocks[0].Peer.ID != capped.ID || blocks[0].Reason != wg.BlockLimit || blocks[0].Used.RxBytes != 1000 {
 		t.Fatalf("blocks = %+v", blocks)
 	}
 	if strings.Contains(config(), capped.PublicKey.String()) {

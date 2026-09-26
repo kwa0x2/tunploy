@@ -17,6 +17,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/update"
 	"github.com/kwa0x2/tunploy/internal/web"
+	"github.com/kwa0x2/tunploy/internal/webhook"
 )
 
 const (
@@ -33,6 +34,7 @@ type Server struct {
 	geo           *geoip.DB
 	https         HTTPS
 	notifier      *notify.Notifier
+	webhooks      *webhook.Dispatcher
 	backups       *backup.Service
 	updates       *update.Service
 	loginThrottle *auth.Throttle
@@ -55,6 +57,7 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, nod
 		geo:           geo,
 		https:         https,
 		notifier:      notify.New(),
+		webhooks:      webhook.New(st),
 		backups:       bk,
 		updates:       up,
 		loginThrottle: auth.NewThrottle(loginMaxAttempts, loginWindow),
@@ -75,6 +78,9 @@ func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, nod
 }
 
 func (s *Server) Close() { s.stopStreams() }
+
+// RunWebhooks sends queued webhook deliveries until ctx ends.
+func (s *Server) RunWebhooks(ctx context.Context) { s.webhooks.Run(ctx) }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
@@ -116,6 +122,13 @@ func (s *Server) routes() http.Handler {
 	private.Handle("GET /api/api-keys", httpx.Handler(s.handleListAPIKeys))
 	private.Handle("POST /api/api-keys", httpx.Handler(s.handleCreateAPIKey))
 	private.Handle("DELETE /api/api-keys/{id}", httpx.Handler(s.handleDeleteAPIKey))
+	private.Handle("GET /api/webhooks", httpx.Handler(s.handleListWebhooks))
+	private.Handle("POST /api/webhooks", httpx.Handler(s.handleCreateWebhook))
+	private.Handle("PATCH /api/webhooks/{id}", httpx.Handler(s.handleUpdateWebhook))
+	private.Handle("DELETE /api/webhooks/{id}", httpx.Handler(s.handleDeleteWebhook))
+	private.Handle("POST /api/webhooks/{id}/ping", httpx.Handler(s.handlePingWebhook))
+	private.Handle("GET /api/webhooks/{id}/deliveries", httpx.Handler(s.handleListDeliveries))
+	private.Handle("POST /api/webhooks/{id}/deliveries/{deliveryID}/retry", httpx.Handler(s.handleRetryDelivery))
 
 	private.Handle("GET /api/backups", httpx.Handler(s.handleListBackups))
 	private.Handle("POST /api/backups", httpx.Handler(s.handleCreateBackup))
@@ -149,6 +162,7 @@ func (s *Server) routes() http.Handler {
 	private.Handle("DELETE /api/instances/{id}/peers/{peerID}", httpx.Handler(s.handleDeletePeer))
 	private.Handle("GET /api/instances/{id}/peers/{peerID}/config", httpx.Handler(s.handlePeerConfig))
 	private.Handle("GET /api/instances/{id}/peers/{peerID}/usage", httpx.Handler(s.handlePeerUsage))
+	private.Handle("POST /api/instances/{id}/peers/{peerID}/usage/reset", httpx.Handler(s.handleResetPeerUsage))
 
 	// Unmatched paths get the JSON envelope too.
 	private.Handle("/api/", httpx.Handler(func(w http.ResponseWriter, r *http.Request) error {
@@ -156,6 +170,7 @@ func (s *Server) routes() http.Handler {
 	}))
 
 	mux.Handle("/api/", chain(private, s.requireAuth))
+	mux.HandleFunc("GET /api/v1/openapi.json", handleOpenAPI)
 	mux.Handle("/api/v1/", s.apiRoutes())
 	mux.Handle("/", web.Handler())
 

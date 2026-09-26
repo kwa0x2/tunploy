@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/wg"
@@ -156,6 +157,85 @@ func (s *Store) MonthUsage(ctx context.Context, instanceID int64, now time.Time)
 		usage[id] = t
 	}
 	return usage, rows.Err()
+}
+
+// limitStart is the first usage day that counts toward a peer's data limit.
+// Its one argument is the first day of the current month.
+const limitStart = `(CASE WHEN wg_peers.limit_period = 'total' THEN wg_peers.usage_reset_day
+	ELSE MAX(?, wg_peers.usage_reset_day) END)`
+
+// limitUsed is the total that counts toward the limit, for SQL filters. It
+// takes the first day of the current month twice.
+const limitUsed = `MAX(0, COALESCE((SELECT SUM(u.rx_bytes + u.tx_bytes) FROM wg_peer_usage u
+		WHERE u.peer_id = wg_peers.id AND u.day >= ` + limitStart + `), 0)
+	- CASE WHEN wg_peers.usage_reset_day = ` + limitStart + `
+		THEN wg_peers.usage_reset_rx + wg_peers.usage_reset_tx ELSE 0 END)`
+
+// LimitUsage is what counts toward each peer's data limit right now: usage
+// since its period began or its usage was reset, whichever is later. Peers
+// with none are absent from the map.
+func (s *Store) LimitUsage(ctx context.Context, instanceID int64, now time.Time) (map[int64]wg.Traffic, error) {
+	return s.limitUsage(ctx, `wg_peers.instance_id = ?`, []any{instanceID}, now)
+}
+
+// PeersLimitUsage is LimitUsage for peers on any server.
+func (s *Store) PeersLimitUsage(ctx context.Context, ids []int64, now time.Time) (map[int64]wg.Traffic, error) {
+	if len(ids) == 0 {
+		return map[int64]wg.Traffic{}, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return s.limitUsage(ctx, `wg_peers.id IN (?`+strings.Repeat(", ?", len(ids)-1)+`)`, args, now)
+}
+
+func (s *Store) limitUsage(ctx context.Context, where string, args []any, now time.Time) (map[int64]wg.Traffic, error) {
+	month := dayKey(MonthStart(now))
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT wg_peers.id, COALESCE(SUM(u.rx_bytes), 0), COALESCE(SUM(u.tx_bytes), 0),
+			CASE WHEN wg_peers.usage_reset_day = `+limitStart+` THEN wg_peers.usage_reset_rx ELSE 0 END,
+			CASE WHEN wg_peers.usage_reset_day = `+limitStart+` THEN wg_peers.usage_reset_tx ELSE 0 END
+		 FROM wg_peers LEFT JOIN wg_peer_usage u ON u.peer_id = wg_peers.id AND u.day >= `+limitStart+`
+		 WHERE `+where+`
+		 GROUP BY wg_peers.id`, append([]any{month, month, month}, args...)...)
+	if err != nil {
+		return nil, fmt.Errorf("limit usage: %w", err)
+	}
+	defer rows.Close()
+
+	usage := map[int64]wg.Traffic{}
+	for rows.Next() {
+		var id int64
+		var sum, before wg.Traffic
+		if err := rows.Scan(&id, &sum.RxBytes, &sum.TxBytes, &before.RxBytes, &before.TxBytes); err != nil {
+			return nil, fmt.Errorf("scan limit usage: %w", err)
+		}
+		t := wg.Traffic{RxBytes: max(0, sum.RxBytes-before.RxBytes), TxBytes: max(0, sum.TxBytes-before.TxBytes)}
+		if t.Total() > 0 {
+			usage[id] = t
+		}
+	}
+	return usage, rows.Err()
+}
+
+// ResetPeerUsage starts the count toward the peer's limit again from now.
+// Its history stays: the usage charts still show every byte.
+func (s *Store) ResetPeerUsage(ctx context.Context, id int64, now time.Time) (*wg.Peer, error) {
+	day := dayKey(now)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE wg_peers SET usage_reset_at = ?, usage_reset_day = ?,
+			usage_reset_rx = COALESCE((SELECT rx_bytes FROM wg_peer_usage WHERE peer_id = wg_peers.id AND day = ?), 0),
+			usage_reset_tx = COALESCE((SELECT tx_bytes FROM wg_peer_usage WHERE peer_id = wg_peers.id AND day = ?), 0),
+			updated_at = ?
+		 WHERE id = ?`, now.Unix(), day, day, day, now.Unix(), id)
+	if err != nil {
+		return nil, fmt.Errorf("reset peer usage: %w", err)
+	}
+	if err := expectOneRow(res, "reset peer usage"); err != nil {
+		return nil, err
+	}
+	return s.PeerByID(ctx, id)
 }
 
 // PeerUsage returns the last days and months up to now, oldest first, with

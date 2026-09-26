@@ -34,6 +34,19 @@ export function lastSeen(peer: Peer): string | undefined {
 
 export const monthTotal = (peer: Peer) => peer.month_usage.rx_bytes + peer.month_usage.tx_bytes
 
+// What counts toward the data limit: this month, or since the last reset.
+export const periodTotal = (peer: Peer) => peer.period_usage.rx_bytes + peer.period_usage.tx_bytes
+
+// The reset the limit counts from; a monthly count has moved past an older one.
+export function countedSince(peer: Peer, now = new Date()): string | undefined {
+  const at = peer.usage_reset_at
+  if (!at) return undefined
+  if (peer.limit_period === "monthly" && new Date(at) < new Date(now.getFullYear(), now.getMonth(), 1)) {
+    return undefined
+  }
+  return at
+}
+
 export const gib = 1024 ** 3
 
 export function formatDateTime(iso: string): string {
@@ -75,6 +88,12 @@ export function countryName(code: string): string {
 export function countryFlag(code: string): string {
   if (!/^[A-Z]{2}$/.test(code)) return ""
   return String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65))
+}
+
+// "🇩🇪 Frankfurt, Germany", or "" when the server has no location.
+export function locationText({ country, city }: { country: string; city?: string }): string {
+  const place = [city, country && countryName(country)].filter(Boolean).join(", ")
+  return [country && countryFlag(country), place].filter(Boolean).join(" ")
 }
 
 export function endpointHost(endpoint: string): string {

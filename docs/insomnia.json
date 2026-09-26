@@ -1,7 +1,7 @@
 {
   "_type": "export",
   "__export_format": 4,
-  "__export_date": "2026-09-25T12:00:00.000Z",
+  "__export_date": "2026-09-26T12:00:00.000Z",
   "__export_source": "tunploy",
   "resources": [
     {
@@ -9,7 +9,7 @@
       "_type": "workspace",
       "parentId": null,
       "name": "Tunploy API v1",
-      "description": "Tunploy's /api/v1 plus the panel endpoints that manage API keys. Start with Panel → Sign in, then Create API key, and paste the token into the environment's api_key.",
+      "description": "Tunploy's /api/v1 plus the panel endpoints that manage API keys. Start with Panel → Sign in, then Create API key, and paste the token into the environment's api_key. The full reference is at /api/v1/openapi.json.",
       "scope": "collection"
     },
     {
@@ -39,7 +39,10 @@
         "external_id": "user_123",
         "client_public_key": "paste the output of: wg genkey | wg pubkey",
         "idempotency_key": "order-1042",
-        "last_event_id": 0
+        "last_event_id": 0,
+        "webhook_id": 1,
+        "delivery_id": 1,
+        "webhook_url": "https://example.com/hooks/tunploy"
       },
       "dataPropertyOrder": {
         "&": [
@@ -143,7 +146,7 @@
       "url": "{{ _.base_url }}/api/api-keys",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"name\": \"insomnia\",\n  \"scopes\": [\n    \"devices:read\",\n    \"devices:write\",\n    \"servers:read\",\n    \"events:read\"\n  ]\n}"
+        "text": "{\n  \"name\": \"insomnia\",\n  \"scopes\": [\n    \"devices:read\",\n    \"devices:write\",\n    \"servers:read\",\n    \"events:read\",\n    \"webhooks:write\"\n  ]\n}"
       },
       "parameters": [],
       "headers": [
@@ -803,6 +806,303 @@
         "prefix": "Bearer"
       },
       "metaSortKey": 27,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "fld_webhooks",
+      "_type": "request_group",
+      "parentId": "wrk_tunploy",
+      "name": "6. Webhooks",
+      "description": "Needs webhooks:write. Set webhook_url to something you can watch, such as a webhook.site address, and webhook_id to the created webhook.",
+      "environment": {},
+      "metaSortKey": 5
+    },
+    {
+      "_id": "req_28",
+      "_type": "request",
+      "parentId": "fld_devices",
+      "name": "Reset usage",
+      "description": "Starts the count toward the data limit again. With limit_period total, call this on each renewal.",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/devices/{{ _.device_id }}/usage/reset",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 28,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_29",
+      "_type": "request",
+      "parentId": "fld_devices",
+      "name": "Switch to a total limit",
+      "description": "",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/api/v1/devices/{{ _.device_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"data_limit\": 53687091200,\n  \"limit_period\": \"total\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 29,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_30",
+      "_type": "request",
+      "parentId": "fld_servers",
+      "name": "Servers in one country",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/servers?country=DE",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 30,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_31",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Add webhook",
+      "description": "The reply's secret is shown only this once.",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/webhooks",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"url\": \"{{ _.webhook_url }}\",\n  \"events\": [\n    \"device.limit_reached\",\n    \"device.expired\",\n    \"device.usage_reset\",\n    \"server.down\"\n  ]\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 31,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_32",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "List webhooks",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/webhooks",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 32,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_33",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Get webhook",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/webhooks/{{ _.webhook_id }}",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 33,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_34",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Subscribe to everything",
+      "description": "",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/api/v1/webhooks/{{ _.webhook_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"events\": [\n    \"*\"\n  ]\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 34,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_35",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Turn off",
+      "description": "Drops the deliveries still waiting.",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/api/v1/webhooks/{{ _.webhook_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"enabled\": false\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 35,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_36",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Send test",
+      "description": "",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/webhooks/{{ _.webhook_id }}/ping",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 36,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_37",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Deliveries",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/webhooks/{{ _.webhook_id }}/deliveries",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 37,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_38",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Send a delivery again",
+      "description": "",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/webhooks/{{ _.webhook_id }}/deliveries/{{ _.delivery_id }}/retry",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 38,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_39",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Delete webhook",
+      "description": "",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/api/v1/webhooks/{{ _.webhook_id }}",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 39,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_40",
+      "_type": "request",
+      "parentId": "wrk_tunploy",
+      "name": "OpenAPI description",
+      "description": "Public: no key needed.",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/openapi.json",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 40,
       "settingSendCookies": true,
       "settingStoreCookies": true
     }

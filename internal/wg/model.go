@@ -34,8 +34,11 @@ type Instance struct {
 	MTU                 int            `json:"mtu"`
 	PersistentKeepalive int            `json:"persistent_keepalive"`
 	ClientAllowedIPs    []netip.Prefix `json:"client_allowed_ips"`
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
+	// ISO 3166 alpha-2, upper case; both may be empty.
+	Country   string    `json:"country"`
+	City      string    `json:"city"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // The private key is kept so the config and QR code can be shown again,
@@ -53,8 +56,11 @@ type Peer struct {
 	ExternalID string `json:"external_id,omitempty"`
 	// A JSON object, stored as given.
 	Metadata json.RawMessage `json:"metadata,omitempty"`
-	// Bytes per calendar month, both directions; 0 means no limit.
-	DataLimit     int64      `json:"data_limit"`
+	// Bytes per LimitPeriod, both directions; 0 means no limit.
+	DataLimit   int64       `json:"data_limit"`
+	LimitPeriod LimitPeriod `json:"limit_period"`
+	// The limit counts from here when it is later than the period's start.
+	UsageResetAt  *time.Time `json:"usage_reset_at,omitempty"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 	LastHandshake *time.Time `json:"last_handshake,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -85,6 +91,7 @@ func NewPeer(instanceID int64, name string) Peer {
 		PublicKey:    priv.PublicKey(),
 		PresharedKey: GeneratePresharedKey(),
 		Enabled:      true,
+		LimitPeriod:  PeriodMonthly,
 	}
 }
 
@@ -96,6 +103,7 @@ func NewClientPeer(instanceID int64, name string, public Key) Peer {
 		PublicKey:    public,
 		PresharedKey: GeneratePresharedKey(),
 		Enabled:      true,
+		LimitPeriod:  PeriodMonthly,
 	}
 }
 

@@ -14,14 +14,14 @@ Tunploy runs as a single Docker container on your Linux server. From its web pan
 
 - **One-click VPN servers.** Each WireGuard server runs in its own container, on its own UDP port, with its own DNS, MTU, keepalive and allowed IPs.
 - **More machines from one panel.** Add another VPS with its SSH login and run VPN servers there too; nothing is installed on it but Docker.
-- **Devices.** Add a device and scan its QR code with the WireGuard app, or download its `.conf`. Turn devices off, give them a monthly data limit or an expiry date.
+- **Devices.** Add a device and scan its QR code with the WireGuard app, or download its `.conf`. Turn devices off, give them a data limit (per month or in total) or an expiry date.
 - **Live status and usage.** See which devices are online, from which country, and their daily and monthly traffic.
 - **Activity log.** Connections, changes and sign-ins, in one place.
 - **HTTPS from the panel.** Point a domain at the server and the panel gets its own Let's Encrypt certificate.
 - **Two-factor sign-in** with any authenticator app.
 - **Email notifications** when servers go down, devices hit their limit, sign-ins fail and more.
 - **Backups** to your computer or any S3-compatible storage, on a schedule, optionally encrypted.
-- **An HTTP API** with scoped keys, so a billing backend, bot or script can create and manage devices.
+- **An HTTP API** with scoped keys and signed webhooks, so a billing backend, bot or script can create and manage devices and hear when they run out of data. Described in OpenAPI.
 - **In-panel updates** that roll back on their own if the new version doesn't start.
 - **A `tunploy` command** on the server for resetting the admin password, restoring backups, reading logs and uninstalling.
 
@@ -59,6 +59,7 @@ Open `http://YOUR_SERVER_IP:3000`, sign in, and [create your first VPN](#create-
   - [Email notifications](#email-notifications)
   - [Backups](#backups)
   - [API](#api)
+  - [Webhooks](#webhooks)
 - [Maintenance](#maintenance)
   - [Updating](#updating)
   - [Server commands](#server-commands)
@@ -291,16 +292,21 @@ Keep keys on your own server. A key built into a mobile app or web page can be p
 | `devices:write` | create, change, turn off and delete devices |
 | `servers:read` | list servers, their status and how many devices still fit |
 | `events:read` | read device, server and node events |
+| `webhooks:write` | add, change and remove [webhooks](#webhooks) and see their deliveries |
 
 | Endpoint | |
 | --- | --- |
 | `GET /api/v1/devices` | filter with `server_id`, `external_id`, `status` (`active`, `disabled`, `expired`, `limit_reached`) |
-| `POST /api/v1/devices` | `server_id`, and optionally `name`, `public_key`, `external_id`, `metadata`, `enabled`, `data_limit`, `expires_at` |
+| `POST /api/v1/devices` | `server_id`, and optionally `name`, `public_key`, `external_id`, `metadata`, `enabled`, `data_limit`, `limit_period`, `expires_at` |
 | `GET`, `PATCH`, `DELETE /api/v1/devices/{id}` | `PATCH` takes the fields of a create except `server_id` and `public_key`; `null` clears `metadata` or `expires_at` |
 | `GET /api/v1/devices/{id}/config` | the `.conf` file, or a PNG QR code with `?format=qr` |
-| `GET /api/v1/devices/{id}/usage` | this month, plus daily and monthly traffic |
-| `GET /api/v1/servers`, `GET /api/v1/servers/{id}` | |
+| `GET /api/v1/devices/{id}/usage` | what counts toward the limit, this month, and daily and monthly traffic |
+| `POST /api/v1/devices/{id}/usage/reset` | start the count toward the data limit again from now |
+| `GET /api/v1/servers`, `GET /api/v1/servers/{id}` | filter with `country`; each has a `country`, `city`, `device_count` and `capacity` |
 | `GET /api/v1/events` | oldest first; keep the last `id` you saw and ask again with `?after=`. Filter with `kind`, `server_id`, `device_id` |
+| `/api/v1/webhooks` | see [Webhooks](#webhooks) |
+
+The full description is at `/api/v1/openapi.json` (OpenAPI 3.1, no key needed). Load it into Postman, Insomnia or Swagger UI, or generate a client from it.
 
 Creating a device returns it with its config:
 
@@ -314,12 +320,75 @@ curl https://vpn.example.com/api/v1/devices \
 
 - **`external_id`** is your own user's ID. It need not be unique, so one user can have several devices; find them with `?external_id=`. **`metadata`** is any JSON object up to 4 KB, stored as given.
 - **`public_key`**: an app that makes its own key pair sends only the public half, and the private key never reaches the panel. The returned config then has no `PrivateKey` line for the app to fill in. Without it, the panel makes the keys as it does for devices added in the panel.
+- **`data_limit`** is in bytes, downloads and uploads together. With **`limit_period: "monthly"`** (the default) the count starts again on the 1st of each month in the panel's time zone. Subscriptions rarely renew on the 1st: for those, use **`"total"`** and call `POST /api/v1/devices/{id}/usage/reset` on each renewal, together with a `PATCH` that moves `expires_at`. A reset lets a device that hit its limit connect again at once; its traffic history stays. Each device shows `period_usage` (what counts toward the limit) next to `month_usage` (the calendar month).
 - **`Idempotency-Key`** on a `POST` makes a retry safe: the same key with the same body returns the first reply (with `Idempotent-Replayed: true`) instead of making a second device. Keys are remembered for 24 hours, per API key.
 - **Lists** return `{"data": [...], "has_more": true}`; ask for the next page with `?after=<last id>`, and up to 200 at a time with `limit`.
 - **Errors** look like the panel's: `{"error": {"code": "validation_failed", "message": "...", "fields": {...}}}`. A full server answers `server_full`.
+- **Locations**: give each server a country and city in its settings (the country is guessed from the endpoint's IP when you create it). An app can list `GET /api/v1/servers?country=DE` as "Germany" and let the user pick.
 - Each key may make 10 requests a second, with bursts of up to 60; past that the reply is `429` with `Retry-After`.
 
 Changes made with a key show up in the activity log and in emails as "via API key <name>". Restoring a backup brings keys back; revoking one stops it at once.
+
+A site that sells monthly VPN plans, from start to end:
+
+1. A customer pays. The site's backend calls `POST /api/v1/devices` with `server_id`, `external_id: "user_123"`, `data_limit: 53687091200` (50 GB), `limit_period: "total"`, `expires_at` a month away, and an `Idempotency-Key` of the order ID. It shows the returned `config` (or fetches `/config?format=qr`).
+2. The plan renews. The backend calls `/usage/reset` and `PATCH`es `expires_at` a month further.
+3. The customer uses up the 50 GB. Tunploy cuts the device off within ten seconds and posts `device.limit_reached` to the site's webhook, which emails an upgrade offer.
+4. The customer cancels. The backend lets `expires_at` pass (`device.expired` arrives) or deletes the device.
+
+### Webhooks
+
+Instead of polling `/api/v1/events`, let Tunploy post each event to your program as it happens. Add an endpoint under **Settings → Webhooks**, or with a `webhooks:write` key:
+
+```sh
+curl https://vpn.example.com/api/v1/webhooks \
+  -H "Authorization: Bearer tp_..." \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://billing.example.com/hooks/tunploy", "events": ["device.limit_reached", "device.expired", "server.down"]}'
+```
+
+The reply holds a `secret` (`whsec_...`), shown this once. `events` takes any device, server or node event kind from the events API, or `["*"]` for all of them. **Send test** in the panel (or `POST /api/v1/webhooks/{id}/ping`) posts a `ping` event.
+
+Each delivery is a `POST` whose JSON body is the event, exactly as `GET /api/v1/events` lists it:
+
+```json
+{"id": 812, "kind": "device.limit_reached", "created_at": "2026-09-26T10:15:04Z", "server_id": 1, "server_name": "Frankfurt",
+ "device_id": 42, "device_name": "user_123-9f2c1a", "detail": "used 50 GB of 50 GB in total"}
+```
+
+with these headers:
+
+| Header | |
+| --- | --- |
+| `X-Tunploy-Event` | the event kind |
+| `X-Tunploy-Delivery` | the delivery's ID, the same on every retry |
+| `X-Tunploy-Signature` | `t=<unix time>,v1=<hex>`: HMAC-SHA256 of `<t>.<raw body>`, keyed with the secret |
+
+Check the signature before trusting the body, and turn away old timestamps so a captured request cannot be played back later:
+
+```js
+import crypto from "node:crypto"
+
+function verify(secret, header, rawBody) {
+  const { t, v1 } = Object.fromEntries(header.split(",").map((part) => part.split("=")))
+  if (Math.abs(Date.now() / 1000 - Number(t)) > 300) return false
+  const expected = crypto.createHmac("sha256", secret).update(`${t}.${rawBody}`).digest("hex")
+  return v1.length === expected.length && crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected))
+}
+```
+
+```python
+import hashlib, hmac, time
+
+def verify(secret: str, header: str, raw_body: bytes) -> bool:
+    parts = dict(p.split("=", 1) for p in header.split(","))
+    if abs(time.time() - int(parts["t"])) > 300:
+        return False
+    expected = hmac.new(secret.encode(), parts["t"].encode() + b"." + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, parts["v1"])
+```
+
+Answer with any `2xx` within 10 seconds. A different status, a timeout or a redirect (redirects are not followed) counts as a failure, and the delivery is tried again after 1 and 5 minutes, 30 minutes, 2, 6 and 12 hours before Tunploy gives up. Deliveries wait in the database, so a panel restart does not lose them. Because of retries, the same event can arrive twice and out of order: use the event `id` to skip ones you have seen. Every delivery, with its status code or error, is listed under **Deliveries** for 30 days, where you can also send one again. Turning a webhook off drops what it had waiting.
 
 ## Maintenance
 

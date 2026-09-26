@@ -64,6 +64,9 @@ export interface InstanceSettings {
   mtu: number
   persistent_keepalive: number
   client_allowed_ips: string[]
+  // ISO 3166 code such as "DE"; for the defaults, a guess from the endpoint.
+  country: string
+  city?: string
 }
 
 export interface Instance extends InstanceSettings {
@@ -104,6 +107,9 @@ export interface Traffic {
 
 export type PeerBlock = "limit" | "expired"
 
+// monthly starts again each calendar month; total only on a usage reset.
+export type LimitPeriod = "monthly" | "total"
+
 export interface Peer {
   id: number
   instance_id: number
@@ -111,8 +117,10 @@ export interface Peer {
   address: string
   public_key: string
   enabled: boolean
-  // Bytes per calendar month, both directions; 0 means no limit.
+  // Bytes per limit period, both directions; 0 means no limit.
   data_limit: number
+  limit_period: LimitPeriod
+  usage_reset_at?: string
   expires_at?: string
   last_handshake?: string
   // Set by an API client for its own user.
@@ -124,6 +132,8 @@ export interface Peer {
   stats?: PeerStats
   country?: string
   month_usage: Traffic
+  // What counts toward data_limit.
+  period_usage: Traffic
   blocked?: PeerBlock
 }
 
@@ -154,7 +164,7 @@ export interface ActivityEvent {
   actor?: string
 }
 
-export type ApiScope = "devices:read" | "devices:write" | "servers:read" | "events:read"
+export type ApiScope = "devices:read" | "devices:write" | "servers:read" | "events:read" | "webhooks:write"
 
 export interface ApiKey {
   id: number
@@ -176,6 +186,52 @@ export interface ApiKeyInput {
 
 // token is shown this once; the panel keeps only its hash.
 export type CreatedApiKey = ApiKey & { token: string }
+
+export interface Webhook {
+  id: number
+  url: string
+  // Event kinds, or ["*"] for all of them.
+  events: string[]
+  description: string
+  enabled: boolean
+  // "api:<key name>" when an API key made it.
+  created_by?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WebhookInput {
+  url?: string
+  events?: string[]
+  description?: string
+  enabled?: boolean
+}
+
+// secret is shown this once.
+export type CreatedWebhook = Webhook & { secret: string }
+
+export type DeliveryState = "pending" | "succeeded" | "failed"
+
+export interface WebhookDelivery {
+  id: number
+  webhook_id: number
+  event_id?: number
+  kind: string
+  payload: unknown
+  state: DeliveryState
+  attempts: number
+  next_attempt_at?: string
+  last_attempt_at?: string
+  response_status?: number
+  error?: string
+  duration_ms?: number
+  created_at: string
+}
+
+export interface Page<T> {
+  data: T[]
+  has_more: boolean
+}
 
 export interface Release {
   version: string
@@ -208,6 +264,7 @@ export type PeerInput = {
   name?: string
   enabled?: boolean
   data_limit?: number
+  limit_period?: LimitPeriod
   expires_at?: string | null
 }
 
@@ -602,6 +659,17 @@ export const api = {
   apiKeys: () => request<ApiKey[]>("/api/api-keys"),
   createApiKey: (input: ApiKeyInput) => post<CreatedApiKey>("/api/api-keys", input),
   deleteApiKey: (id: number) => del(`/api/api-keys/${id}`),
+  webhooks: () => request<Webhook[]>("/api/webhooks"),
+  createWebhook: (input: WebhookInput) => post<CreatedWebhook>("/api/webhooks", input),
+  updateWebhook: (id: number, input: WebhookInput) => patch<Webhook>(`/api/webhooks/${id}`, input),
+  deleteWebhook: (id: number) => del(`/api/webhooks/${id}`),
+  pingWebhook: (id: number) => post<WebhookDelivery>(`/api/webhooks/${id}/ping`),
+  webhookDeliveries: (id: number, before?: number) =>
+    request<Page<WebhookDelivery>>(
+      `/api/webhooks/${id}/deliveries?limit=20${before ? `&before=${before}` : ""}`,
+    ),
+  retryDelivery: (id: number, deliveryId: number) =>
+    post<WebhookDelivery>(`/api/webhooks/${id}/deliveries/${deliveryId}/retry`),
   events: (opts: { limit: number; category?: EventCategory }) =>
     request<ActivityEvent[]>(
       `/api/events?limit=${opts.limit}${opts.category ? `&category=${opts.category}` : ""}`,
@@ -646,4 +714,6 @@ export const api = {
     fetchText(peerConfigUrl(instanceId, peerId)),
   peerUsage: (instanceId: number, peerId: number) =>
     request<PeerUsage>(`${peerPath(instanceId, peerId)}/usage`),
+  resetPeerUsage: (instanceId: number, peerId: number) =>
+    post<Peer>(`${peerPath(instanceId, peerId)}/usage/reset`),
 }

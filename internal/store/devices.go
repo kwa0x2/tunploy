@@ -24,12 +24,12 @@ func ValidDeviceStatus(s string) bool {
 	return false
 }
 
-// DeviceStatus matches the filter in Devices.
-func DeviceStatus(p wg.Peer, month wg.Traffic, now time.Time) string {
+// DeviceStatus matches the filter in Devices; used is LimitUsage.
+func DeviceStatus(p wg.Peer, used wg.Traffic, now time.Time) string {
 	if !p.Enabled {
 		return DeviceDisabled
 	}
-	switch p.Blocked(month, now) {
+	switch p.Blocked(used, now) {
 	case wg.BlockExpired:
 		return DeviceExpired
 	case wg.BlockLimit:
@@ -60,8 +60,6 @@ func (s *Store) Devices(ctx context.Context, f DeviceFilter, now time.Time) ([]w
 		args = append(args, f.ExternalID)
 	}
 
-	const used = `COALESCE((SELECT SUM(u.rx_bytes + u.tx_bytes) FROM wg_peer_usage u
-		WHERE u.peer_id = wg_peers.id AND u.day >= ?), 0)`
 	const live = `enabled = 1 AND (expires_at IS NULL OR expires_at > ?)`
 	month, at := dayKey(MonthStart(now)), now.Unix()
 	switch f.Status {
@@ -71,11 +69,11 @@ func (s *Store) Devices(ctx context.Context, f DeviceFilter, now time.Time) ([]w
 		where = append(where, "enabled = 1 AND expires_at <= ?")
 		args = append(args, at)
 	case DeviceLimitReached:
-		where = append(where, live, "data_limit > 0 AND "+used+" >= data_limit")
-		args = append(args, at, month)
+		where = append(where, live, "data_limit > 0 AND "+limitUsed+" >= data_limit")
+		args = append(args, at, month, month)
 	case DeviceActive:
-		where = append(where, live, "(data_limit = 0 OR "+used+" < data_limit)")
-		args = append(args, at, month)
+		where = append(where, live, "(data_limit = 0 OR "+limitUsed+" < data_limit)")
+		args = append(args, at, month, month)
 	}
 	args = append(args, f.Limit)
 

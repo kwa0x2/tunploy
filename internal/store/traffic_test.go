@@ -161,3 +161,94 @@ func TestPeerLimitsRoundTrip(t *testing.T) {
 		t.Fatalf("limits not cleared: %d %v", updated.DataLimit, updated.ExpiresAt)
 	}
 }
+
+func TestLimitUsage(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	in := createInstance(t, st, "Home", 51820)
+	monthly := *createPeer(t, st, in.ID, "monthly")
+	total := wg.NewPeer(in.ID, "total")
+	total.LimitPeriod = wg.PeriodTotal
+	total.DataLimit = 300
+	created, err := st.CreatePeer(ctx, total)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total = *created
+
+	add := func(p wg.Peer, at time.Time, rx int64) {
+		t.Helper()
+		for _, stats := range []map[wg.Key]wg.PeerStats{{p.PublicKey: {}}, {p.PublicKey: {RxBytes: rx}}, nil} {
+			if err := st.RecordTraffic(ctx, in.ID, stats, at); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	used := func(now time.Time) map[int64]wg.Traffic {
+		t.Helper()
+		byServer, err := st.LimitUsage(ctx, in.ID, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byID, err := st.PeersLimitUsage(ctx, []int64{monthly.ID, total.ID}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(byServer) != len(byID) || byServer[monthly.ID] != byID[monthly.ID] || byServer[total.ID] != byID[total.ID] {
+			t.Fatalf("by server %+v, by id %+v", byServer, byID)
+		}
+		return byServer
+	}
+	status := func(now time.Time, want string) {
+		t.Helper()
+		devices, err := st.Devices(ctx, DeviceFilter{Status: want, Limit: 10, After: monthly.ID}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(devices) != 1 || devices[0].ID != total.ID {
+			t.Fatalf("%s devices = %+v", want, devices)
+		}
+	}
+
+	august := time.Date(2026, 8, 20, 12, 0, 0, 0, time.Local)
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.Local)
+	for _, p := range []wg.Peer{monthly, total} {
+		add(p, august, 1000)
+		add(p, now.Add(-2*time.Hour), 100)
+	}
+	got := used(now)
+	if got[monthly.ID].RxBytes != 100 || got[total.ID].RxBytes != 1100 {
+		t.Fatalf("before reset: %+v", got)
+	}
+	status(now, DeviceLimitReached)
+
+	// The same day's bytes from before the reset stop counting; later ones do.
+	for _, p := range []wg.Peer{monthly, total} {
+		if _, err := st.ResetPeerUsage(ctx, p.ID, now.Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		add(p, now, 40)
+	}
+	got = used(now)
+	if got[monthly.ID].RxBytes != 40 || got[total.ID].RxBytes != 40 {
+		t.Fatalf("after reset: %+v", got)
+	}
+	status(now, DeviceActive)
+
+	// A monthly count starts over with the next month either way.
+	october := time.Date(2026, 10, 2, 12, 0, 0, 0, time.Local)
+	add(monthly, october, 7)
+	add(total, october, 7)
+	got = used(october)
+	if got[monthly.ID].RxBytes != 7 || got[total.ID].RxBytes != 47 {
+		t.Fatalf("next month: %+v", got)
+	}
+
+	reset, err := st.PeerByID(ctx, total.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset.LimitPeriod != wg.PeriodTotal || reset.UsageResetAt == nil || !reset.UsageResetAt.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("stored reset = %s %v", reset.LimitPeriod, reset.UsageResetAt)
+	}
+}

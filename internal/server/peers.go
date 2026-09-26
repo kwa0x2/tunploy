@@ -22,10 +22,11 @@ const (
 )
 
 type peerRequest struct {
-	Name      *string             `json:"name"`
-	Enabled   *bool               `json:"enabled"`
-	DataLimit *int64              `json:"data_limit"`
-	ExpiresAt optional[time.Time] `json:"expires_at"`
+	Name        *string             `json:"name"`
+	Enabled     *bool               `json:"enabled"`
+	DataLimit   *int64              `json:"data_limit"`
+	LimitPeriod *wg.LimitPeriod     `json:"limit_period"`
+	ExpiresAt   optional[time.Time] `json:"expires_at"`
 }
 
 // optional tells an explicit null, which clears a value, from a missing field.
@@ -50,7 +51,9 @@ type peerView struct {
 	Stats       *wg.PeerStats `json:"stats,omitempty"`
 	Country     string        `json:"country,omitempty"`
 	MonthUsage  wg.Traffic    `json:"month_usage"`
-	Blocked     wg.Block      `json:"blocked,omitempty"`
+	// What counts toward the data limit.
+	PeriodUsage wg.Traffic `json:"period_usage"`
+	Blocked     wg.Block   `json:"blocked,omitempty"`
 }
 
 type usageView struct {
@@ -89,13 +92,18 @@ func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) peerViews(ctx context.Context, instanceID int64, peers []wg.Peer) ([]peerView, error) {
 	now := time.Now()
-	usage, err := s.store.MonthUsage(ctx, instanceID, now)
+	month, err := s.store.MonthUsage(ctx, instanceID, now)
+	if err != nil {
+		return nil, err
+	}
+	used, err := s.store.LimitUsage(ctx, instanceID, now)
 	if err != nil {
 		return nil, err
 	}
 	views := make([]peerView, len(peers))
 	for i, p := range peers {
-		views[i] = peerView{Peer: p, KeyOnClient: p.KeyOnClient(), MonthUsage: usage[p.ID], Blocked: p.Blocked(usage[p.ID], now)}
+		views[i] = peerView{Peer: p, KeyOnClient: p.KeyOnClient(), MonthUsage: month[p.ID], PeriodUsage: used[p.ID],
+			Blocked: p.Blocked(used[p.ID], now)}
 	}
 	return views, nil
 }
@@ -118,6 +126,22 @@ func (s *Server) handlePeerUsage(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return httpx.JSON(w, http.StatusOK, usageView{Daily: daily, Monthly: monthly})
+}
+
+func (s *Server) handleResetPeerUsage(w http.ResponseWriter, r *http.Request) error {
+	in, p, err := s.peerFromPath(r)
+	if err != nil {
+		return err
+	}
+	reset, err := s.resetPeerUsage(r.Context(), in, p)
+	if err != nil {
+		return err
+	}
+	view, err := s.peerView(r.Context(), reset)
+	if err != nil {
+		return err
+	}
+	return httpx.JSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) error {
@@ -235,6 +259,25 @@ func (s *Server) updatePeer(ctx context.Context, in *wg.Instance, before, p wg.P
 	return updated, nil
 }
 
+// A device blocked by its limit comes back at once.
+func (s *Server) resetPeerUsage(ctx context.Context, in *wg.Instance, p *wg.Peer) (*wg.Peer, error) {
+	used, err := s.store.PeersLimitUsage(ctx, []int64{p.ID}, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	reset, err := s.store.ResetPeerUsage(ctx, p.ID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	e := peerEvent("device.usage_reset", in, reset)
+	e.Detail = fmt.Sprintf("%s used %s", formatBytes(used[p.ID].Total()), periodText(*p))
+	s.record(ctx, e)
+	if err := s.deploy.Apply(ctx, in.ID); err != nil {
+		return reset, applyError(err)
+	}
+	return reset, nil
+}
+
 func (s *Server) deletePeer(ctx context.Context, in *wg.Instance, p *wg.Peer) error {
 	if err := s.store.DeletePeer(ctx, p.ID); err != nil {
 		return err
@@ -287,6 +330,9 @@ func (req peerRequest) apply(p *wg.Peer) {
 	if req.DataLimit != nil {
 		p.DataLimit = *req.DataLimit
 	}
+	if req.LimitPeriod != nil {
+		p.LimitPeriod = *req.LimitPeriod
+	}
 	if req.ExpiresAt.Set {
 		p.ExpiresAt = req.ExpiresAt.Value
 	}
@@ -297,7 +343,11 @@ func hasLimits(p *wg.Peer) bool { return p.DataLimit > 0 || p.ExpiresAt != nil }
 func limitsDetail(p *wg.Peer) string {
 	var parts []string
 	if p.DataLimit > 0 {
-		parts = append(parts, formatBytes(p.DataLimit)+" a month")
+		per := " a month"
+		if p.LimitPeriod == wg.PeriodTotal {
+			per = " in total"
+		}
+		parts = append(parts, formatBytes(p.DataLimit)+per)
 	}
 	if p.ExpiresAt != nil {
 		parts = append(parts, "until "+expiryText(*p.ExpiresAt))
@@ -306,6 +356,18 @@ func limitsDetail(p *wg.Peer) string {
 		return "no limits"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// periodText finishes "used 3 GB of 5 GB …".
+func periodText(p wg.Peer) string {
+	monthly := p.LimitPeriod != wg.PeriodTotal
+	if r := p.UsageResetAt; r != nil && (!monthly || !r.Before(store.MonthStart(time.Now()))) {
+		return "since " + r.In(time.Local).Format("2 Jan 2006 15:04")
+	}
+	if monthly {
+		return "this month"
+	}
+	return "in total"
 }
 
 // The panel sets expiries at midnight, which reads better as the day before.

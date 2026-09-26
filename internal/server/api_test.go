@@ -27,6 +27,7 @@ type deviceJSON struct {
 	Status     string          `json:"status"`
 	DataLimit  int64           `json:"data_limit"`
 	ExpiresAt  *time.Time      `json:"expires_at"`
+	MonthUsage apiTraffic      `json:"month_usage"`
 	Config     string          `json:"config"`
 }
 
@@ -351,6 +352,55 @@ func TestAPIDeviceLimitReachedStatus(t *testing.T) {
 	}
 }
 
+func TestAPIUsageReset(t *testing.T) {
+	p := newPanel(t)
+	in := p.createInstance(map[string]any{"name": "Frankfurt"})
+	token := p.apiKey("billing", "devices:read", "devices:write", "events:read")
+	var d struct {
+		deviceJSON
+		LimitPeriod  string     `json:"limit_period"`
+		PeriodUsage  apiTraffic `json:"period_usage"`
+		UsageResetAt *time.Time `json:"usage_reset_at"`
+	}
+	p.want(p.api(token, "POST", "/api/v1/devices", map[string]any{
+		"server_id": in.ID, "data_limit": 1000, "limit_period": "total",
+	}), http.StatusCreated, &d)
+	if d.LimitPeriod != "total" || d.UsageResetAt != nil {
+		t.Fatalf("created = %+v", d)
+	}
+	p.wantError(p.api(token, "PATCH", fmt.Sprintf("/api/v1/devices/%d", d.ID), map[string]any{"limit_period": "weekly"}),
+		http.StatusUnprocessableEntity, "validation_failed")
+
+	peer, err := p.s.store.PeerByID(t.Context(), d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rx := range []int64{0, 1500} {
+		stats := map[wg.Key]wg.PeerStats{peer.PublicKey: {RxBytes: rx}}
+		if err := p.s.store.RecordTraffic(t.Context(), in.ID, stats, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p.want(p.api(token, "GET", fmt.Sprintf("/api/v1/devices/%d", d.ID), nil), http.StatusOK, &d)
+	if d.Status != "limit_reached" || d.PeriodUsage.TotalBytes != 1500 {
+		t.Fatalf("before reset = %+v", d)
+	}
+
+	p.want(p.api(token, "POST", fmt.Sprintf("/api/v1/devices/%d/usage/reset", d.ID), nil), http.StatusOK, &d)
+	if d.Status != "active" || d.PeriodUsage.TotalBytes != 0 || d.UsageResetAt == nil || d.MonthUsage.TotalBytes != 1500 {
+		t.Fatalf("after reset = %+v", d)
+	}
+
+	var events pageJSON[struct {
+		Kind   string `json:"kind"`
+		Detail string `json:"detail"`
+	}]
+	p.want(p.api(token, "GET", "/api/v1/events?kind=device.usage_reset", nil), http.StatusOK, &events)
+	if len(events.Data) != 1 || events.Data[0].Detail != "1.5 KB used in total" {
+		t.Fatalf("events = %+v", events.Data)
+	}
+}
+
 func TestAPIIdempotency(t *testing.T) {
 	p := newPanel(t)
 	in := p.createInstance(map[string]any{"name": "Frankfurt"})
@@ -468,5 +518,29 @@ func TestRateLimiter(t *testing.T) {
 	}
 	if ok, _ := l.allow(1, start.Add(time.Second/apiRatePerSec)); ok {
 		t.Fatal("refill gave more than one token")
+	}
+}
+
+func TestAPIServerLocation(t *testing.T) {
+	p := newPanel(t)
+	p.createInstance(map[string]any{"name": "Frankfurt", "country": " de", "city": "Frankfurt am Main"})
+	p.createInstance(map[string]any{"name": "Amsterdam", "country": "NL"})
+	p.wantError(p.do("POST", "/api/instances", map[string]any{"name": "Nowhere", "country": "Germany"}),
+		http.StatusUnprocessableEntity, "validation_failed")
+	token := p.apiKey("app", "servers:read")
+
+	type server struct {
+		Name    string `json:"name"`
+		Country string `json:"country"`
+		City    string `json:"city"`
+	}
+	var pg pageJSON[server]
+	p.want(p.api(token, "GET", "/api/v1/servers?country=de", nil), http.StatusOK, &pg)
+	if len(pg.Data) != 1 || pg.Data[0] != (server{"Frankfurt", "DE", "Frankfurt am Main"}) {
+		t.Fatalf("servers in DE = %+v", pg.Data)
+	}
+	p.want(p.api(token, "GET", "/api/v1/servers", nil), http.StatusOK, &pg)
+	if len(pg.Data) != 2 {
+		t.Fatalf("all servers = %+v", pg.Data)
 	}
 }

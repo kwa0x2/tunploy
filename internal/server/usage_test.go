@@ -96,7 +96,7 @@ func TestPeerBlockIsRecorded(t *testing.T) {
 		InstanceID: in.ID,
 		Peer:       wg.Peer{ID: peer.ID, Name: "phone", DataLimit: 10 << 30},
 		Reason:     wg.BlockLimit,
-		Month:      wg.Traffic{RxBytes: 8 << 30, TxBytes: 2 << 30},
+		Used:       wg.Traffic{RxBytes: 8 << 30, TxBytes: 2 << 30},
 	})
 	p.s.peerBlocked(deploy.PeerBlock{InstanceID: in.ID, Peer: wg.Peer{ID: peer.ID, Name: "phone"}})
 

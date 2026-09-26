@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/page-header"
 import { useResource } from "@/hooks/use-resource"
 import { api } from "@/lib/api"
 import type { Instance, Node } from "@/lib/api"
-import { endpointOf, errorMessage } from "@/lib/format"
+import { endpointOf, errorMessage, locationText } from "@/lib/format"
 
 export function ServersPage() {
   const { data: instances, error } = useResource(api.instances, 10_000)
@@ -85,6 +85,12 @@ function ServerCard({ instance, node }: { instance: Instance; node?: Node }) {
             <>
               <span>Node</span>
               <span className="text-foreground truncate text-right">{node.name}</span>
+            </>
+          )}
+          {locationText(instance) && (
+            <>
+              <span>Location</span>
+              <span className="text-foreground truncate text-right">{locationText(instance)}</span>
             </>
           )}
           <span>Endpoint</span>
