@@ -124,6 +124,8 @@ export interface Peer {
   limit_period: LimitPeriod
   usage_reset_at?: string
   expires_at?: string
+  // kbit/s each way; 0 means no limit.
+  speed_limit: number
   last_handshake?: string
   // Set by an API client for its own user.
   external_id?: string
@@ -137,6 +139,35 @@ export interface Peer {
   // What counts toward data_limit.
   period_usage: Traffic
   blocked?: PeerBlock
+}
+
+export interface ShareLink {
+  url: string
+  // null keeps the link until it is removed.
+  expires_at: string | null
+}
+
+export type DeviceStatus = "active" | "disabled" | "expired" | "limit_reached"
+
+// What a share link's page shows the device's owner, who has no account.
+export interface SharedDevice {
+  name: string
+  country: string
+  city: string
+  status: DeviceStatus
+  online: boolean
+  last_handshake: string | null
+  data_limit: number
+  limit_period: LimitPeriod
+  period_usage: Traffic
+  usage_reset_at: string | null
+  month_usage: Traffic
+  expires_at: string | null
+  speed_limit: number
+  // Missing when the device made its own key pair.
+  config?: string
+  full_tunnel: boolean
+  link_expires_at: string | null
 }
 
 export interface UsagePoint extends Traffic {
@@ -274,6 +305,7 @@ export type PeerInput = {
   data_limit?: number
   limit_period?: LimitPeriod
   expires_at?: string | null
+  speed_limit?: number
 }
 
 export interface Settings {
@@ -489,6 +521,9 @@ const peerPath = (instanceId: number, peerId: number) =>
 
 export const backupExportUrl = "/api/backups/export"
 export const backupFileUrl = (name: string) => `/api/backups/${encodeURIComponent(name)}`
+
+export const sharedConfigUrl = (token: string, killSwitch = false) =>
+  `/api/share/${encodeURIComponent(token)}/config${killSwitch ? "?kill_switch=true" : ""}`
 
 export const peerConfigUrl = (instanceId: number, peerId: number, killSwitch = false) =>
   `${peerPath(instanceId, peerId)}/config${killSwitch ? "?kill_switch=true" : ""}`
@@ -726,4 +761,11 @@ export const api = {
     post<Peer>(`${peerPath(instanceId, peerId)}/usage/reset`),
   movePeer: (instanceId: number, peerId: number, targetId: number) =>
     post<Peer>(`${peerPath(instanceId, peerId)}/move`, { instance_id: targetId }),
+  peerShare: (instanceId: number, peerId: number) =>
+    request<ShareLink>(`${peerPath(instanceId, peerId)}/share`),
+  // Replaces the device's link, so the old one stops working.
+  createPeerShare: (instanceId: number, peerId: number, expiresAt: string | null) =>
+    post<ShareLink>(`${peerPath(instanceId, peerId)}/share`, expiresAt ? { expires_at: expiresAt } : undefined),
+  deletePeerShare: (instanceId: number, peerId: number) => del(`${peerPath(instanceId, peerId)}/share`),
+  sharedDevice: (token: string) => request<SharedDevice>(`/api/share/${encodeURIComponent(token)}`),
 }

@@ -118,3 +118,18 @@ func golden(t *testing.T, name string, got []byte) {
 		t.Errorf("%s mismatch\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
 	}
 }
+
+func TestSpeedLimitsConfig(t *testing.T) {
+	peer := func(addr string, kbit int64, enabled bool) Peer {
+		return Peer{Address: netip.MustParseAddr(addr), SpeedLimit: kbit, Enabled: enabled}
+	}
+	got := string(SpeedLimitsConfig([]Peer{
+		peer("10.8.0.2", 10000, true),
+		peer("10.8.0.3", 0, true),
+		peer("10.8.0.4", 500, false),
+		peer("10.8.0.5", 2500, true),
+	}))
+	if want := "10.8.0.2 10000\n10.8.0.5 2500\n"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

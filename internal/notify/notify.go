@@ -277,6 +277,10 @@ func Describe(e store.Event) string {
 		return device + " can connect to " + server + " again"
 	case "device.usage_reset":
 		return "Data usage was reset for " + device + " on " + server
+	case "device.shared":
+		return "A share link was made for " + device + " on " + server
+	case "device.unshared":
+		return "The share link for " + device + " on " + server + " was removed"
 	case "server.created":
 		return "Server " + server + " was created"
 	case "server.deploy_failed":

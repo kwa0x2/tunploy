@@ -685,7 +685,10 @@ func (m *Manager) container(ctx context.Context, h Host, instanceID int64) (*doc
 }
 
 // The container mounts the directory, not the file, so it sees the rename.
-const resolverFile = "dns-servers.conf"
+const (
+	resolverFile    = "dns-servers.conf"
+	speedLimitsFile = "speed-limits.conf"
+)
 
 func (m *Manager) writeConfig(ctx context.Context, h Host, in *wg.Instance) error {
 	peers, _, blocked, err := m.blockedPeers(ctx, in.ID)
@@ -704,6 +707,16 @@ func (m *Manager) writeConfig(ctx context.Context, h Host, in *wg.Instance) erro
 		err = h.WriteFile(ctx, resolver, wg.ResolverConfig(*in))
 	} else {
 		err = h.RemoveAll(ctx, resolver)
+	}
+	if err != nil {
+		return err
+	}
+	// The container shapes traffic by this file, and clears it once it is gone.
+	speeds := filepath.Join(dir, speedLimitsFile)
+	if limits := wg.SpeedLimitsConfig(allowed); len(limits) > 0 {
+		err = h.WriteFile(ctx, speeds, limits)
+	} else {
+		err = h.RemoveAll(ctx, speeds)
 	}
 	if err != nil {
 		return err

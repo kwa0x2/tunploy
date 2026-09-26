@@ -20,6 +20,9 @@ const (
 	maxCityLength       = 64
 	maxExternalIDLength = 255
 	maxMetadataBytes    = 4096
+
+	// 10 Gbit/s; above that a limit is no limit.
+	MaxSpeedLimit = 10_000_000
 )
 
 func (in Instance) Validate() map[string]string {
@@ -104,6 +107,9 @@ func (p Peer) Validate() map[string]string {
 	}
 	if p.DataLimit < 0 {
 		fields["data_limit"] = "data limit must be 0 (no limit) or more"
+	}
+	if p.SpeedLimit < 0 || p.SpeedLimit > MaxSpeedLimit {
+		fields["speed_limit"] = "speed limit must be between 0 (no limit) and 10000000 kbit/s"
 	}
 	if p.LimitPeriod != "" && !p.LimitPeriod.Valid() {
 		fields["limit_period"] = "limit_period must be monthly or total"

@@ -93,6 +93,18 @@ func KillSwitchConfig(in Instance, p Peer) ([]byte, error) {
 	return slices.Concat(conf[:peer], rules.Bytes(), conf[peer:]), nil
 }
 
+// SpeedLimitsConfig lists each limited peer's address and kbit/s, one per
+// line, for the shaper in the server's container.
+func SpeedLimitsConfig(peers []Peer) []byte {
+	var b bytes.Buffer
+	for _, p := range peers {
+		if p.Enabled && p.SpeedLimit > 0 {
+			fmt.Fprintf(&b, "%s %d\n", p.Address, p.SpeedLimit)
+		}
+	}
+	return b.Bytes()
+}
+
 // ClientDNS is what clients are told to ask.
 func (in Instance) ClientDNS() []netip.Addr {
 	if in.DNSOnServer {

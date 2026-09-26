@@ -55,6 +55,9 @@ func (s *Server) apiEndpoints() []apiEndpoint {
 		{"GET /api/v1/devices/{id}/usage", scopeDevicesRead, s.apiDeviceUsage, false},
 		{"POST /api/v1/devices/{id}/usage/reset", scopeDevicesWrite, s.apiResetDeviceUsage, true},
 		{"POST /api/v1/devices/{id}/move", scopeDevicesWrite, s.apiMoveDevice, true},
+		{"GET /api/v1/devices/{id}/share", scopeDevicesRead, s.apiGetShare, false},
+		{"POST /api/v1/devices/{id}/share", scopeDevicesWrite, s.apiCreateShare, true},
+		{"DELETE /api/v1/devices/{id}/share", scopeDevicesWrite, s.apiDeleteShare, false},
 
 		{"GET /api/v1/groups/{external_id}", scopeDevicesRead, s.apiGetGroup, false},
 		{"PATCH /api/v1/groups/{external_id}", scopeDevicesWrite, s.apiUpdateGroup, false},
@@ -143,6 +146,8 @@ type apiDevice struct {
 	PeriodUsage  apiTraffic `json:"period_usage"`
 	UsageResetAt *time.Time `json:"usage_reset_at"`
 	ExpiresAt    *time.Time `json:"expires_at"`
+	// kbit/s each way; 0 means no limit.
+	SpeedLimit int64 `json:"speed_limit"`
 	// The calendar month, whatever the limit period.
 	MonthUsage apiTraffic `json:"month_usage"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -164,6 +169,7 @@ type apiDeviceRequest struct {
 	DataLimit   *int64                    `json:"data_limit"`
 	LimitPeriod *wg.LimitPeriod           `json:"limit_period"`
 	ExpiresAt   optional[time.Time]       `json:"expires_at"`
+	SpeedLimit  *int64                    `json:"speed_limit"`
 }
 
 func (req apiDeviceRequest) apply(p *wg.Peer) map[string]string {
@@ -199,6 +205,9 @@ func (req apiDeviceRequest) apply(p *wg.Peer) map[string]string {
 	}
 	if req.ExpiresAt.Set {
 		p.ExpiresAt = req.ExpiresAt.Value
+	}
+	if req.SpeedLimit != nil {
+		p.SpeedLimit = *req.SpeedLimit
 	}
 	return fields
 }
@@ -245,6 +254,7 @@ func (s *Server) apiDevices(ctx context.Context, peers []wg.Peer) ([]apiDevice, 
 			PeriodUsage:   newAPITraffic(used[p.ID]),
 			UsageResetAt:  p.UsageResetAt,
 			ExpiresAt:     p.ExpiresAt,
+			SpeedLimit:    p.SpeedLimit,
 			MonthUsage:    newAPITraffic(usage[p.ID]),
 			CreatedAt:     p.CreatedAt,
 			UpdatedAt:     p.UpdatedAt,

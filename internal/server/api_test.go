@@ -27,6 +27,7 @@ type deviceJSON struct {
 	Status     string          `json:"status"`
 	DataLimit  int64           `json:"data_limit"`
 	ExpiresAt  *time.Time      `json:"expires_at"`
+	SpeedLimit int64           `json:"speed_limit"`
 	MonthUsage apiTraffic      `json:"month_usage"`
 	Config     string          `json:"config"`
 }

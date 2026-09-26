@@ -279,10 +279,10 @@ func TestAPIGroups(t *testing.T) {
 
 	until := time.Now().Add(30 * 24 * time.Hour).UTC().Truncate(time.Second)
 	p.want(p.api(token, "PATCH", path, map[string]any{
-		"enabled": true, "data_limit": 50 << 30, "limit_period": "total", "expires_at": until,
+		"enabled": true, "data_limit": 50 << 30, "limit_period": "total", "expires_at": until, "speed_limit": 20000,
 	}), http.StatusOK, &g)
 	for _, d := range g.Devices {
-		if !d.Enabled || d.DataLimit != 50<<30 || d.ExpiresAt == nil || !d.ExpiresAt.Equal(until) {
+		if !d.Enabled || d.DataLimit != 50<<30 || d.ExpiresAt == nil || !d.ExpiresAt.Equal(until) || d.SpeedLimit != 20000 {
 			t.Fatalf("patched device = %+v", d)
 		}
 	}

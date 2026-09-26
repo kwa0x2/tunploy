@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -118,10 +121,64 @@ func TestLimitsDetail(t *testing.T) {
 		{wg.Peer{}, "no limits"},
 		{wg.Peer{DataLimit: 5 << 30, ExpiresAt: &midnight}, "5 GB a month, until the end of 1 Oct 2026"},
 		{wg.Peer{DataLimit: 1536 << 20, ExpiresAt: &odd}, "1.5 GB a month, until 2 Oct 2026 09:30"},
+		{wg.Peer{DataLimit: 1 << 30, LimitPeriod: wg.PeriodTotal, SpeedLimit: 2500}, "1 GB in total, 2.5 Mbit/s"},
+		{wg.Peer{SpeedLimit: 512}, "512 kbit/s"},
 	}
 	for _, tt := range tests {
 		if got := limitsDetail(&tt.peer); got != tt.want {
 			t.Errorf("limitsDetail = %q, want %q", got, tt.want)
 		}
+	}
+}
+
+// The server's container shapes traffic from this file, so it lists only
+// peers that may connect.
+func TestSpeedLimit(t *testing.T) {
+	p := newPanel(t)
+	in := p.createInstance(map[string]any{"name": "Home"})
+	base := fmt.Sprintf("/api/instances/%d/peers", in.ID)
+	file := filepath.Join(p.s.deploy.ConfigDir(in.ID), "speed-limits.conf")
+	limits := func() string {
+		t.Helper()
+		b, err := os.ReadFile(file)
+		if os.IsNotExist(err) {
+			return ""
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	var peer struct {
+		ID         int64 `json:"id"`
+		SpeedLimit int64 `json:"speed_limit"`
+	}
+	p.want(p.do("POST", base, map[string]any{"name": "phone", "speed_limit": 10000}), http.StatusCreated, &peer)
+	p.createPeer(in.ID, "laptop")
+	if peer.SpeedLimit != 10000 || limits() != "10.8.0.2 10000\n" {
+		t.Fatalf("peer = %+v, file = %q", peer, limits())
+	}
+
+	path := fmt.Sprintf("%s/%d", base, peer.ID)
+	p.want(p.do("PATCH", path, map[string]any{"enabled": false}), http.StatusOK, nil)
+	if limits() != "" {
+		t.Fatalf("a disabled peer is still shaped: %q", limits())
+	}
+	p.want(p.do("PATCH", path, map[string]any{"enabled": true, "speed_limit": 0}), http.StatusOK, &peer)
+	if peer.SpeedLimit != 0 || limits() != "" {
+		t.Fatalf("peer = %+v, file = %q", peer, limits())
+	}
+
+	e := p.wantError(p.do("PATCH", path, map[string]any{"speed_limit": -1}), http.StatusUnprocessableEntity, "validation_failed")
+	if e.Error.Fields["speed_limit"] == "" {
+		t.Fatalf("negative speed: %+v", e)
+	}
+
+	var events []eventJSON
+	p.want(p.do("GET", "/api/events?category=change", nil), http.StatusOK, &events)
+	created := slices.IndexFunc(events, func(e eventJSON) bool { return e.Kind == "device.created" && e.Detail == "10 Mbit/s" })
+	if events[0].Kind != "device.limits_changed" || events[0].Detail != "no limits" || created < 0 {
+		t.Fatalf("events = %+v", events)
 	}
 }

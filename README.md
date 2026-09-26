@@ -14,7 +14,8 @@ Tunploy runs as a single Docker container on your Linux server. From its web pan
 
 - **One-click VPN servers.** Each WireGuard server runs in its own container, on its own UDP port, with its own DNS, MTU, keepalive and allowed IPs.
 - **More machines from one panel.** Add another VPS with its SSH login and run VPN servers there too; nothing is installed on it but Docker.
-- **Devices.** Add a device and scan its QR code with the WireGuard app, or download its `.conf`. Turn devices off, give them a data limit (per month or in total) or an expiry date.
+- **Devices.** Add a device and scan its QR code with the WireGuard app, or download its `.conf`. Turn devices off, give them a data limit (per month or in total), a speed limit or an expiry date.
+- **Share links.** Send a device's owner a link to a page with its QR code, config and remaining data, with no account on the panel.
 - **Live status and usage.** See which devices are online, from which country, and their daily and monthly traffic.
 - **Activity log.** Connections, changes and sign-ins, in one place.
 - **HTTPS from the panel.** Point a domain at the server and the panel gets its own Let's Encrypt certificate.
@@ -55,6 +56,8 @@ Open `http://YOUR_SERVER_IP:3000`, sign in, and [create your first VPN](#create-
   - [Create your first VPN](#create-your-first-vpn)
   - [DNS](#dns)
   - [Kill switch](#kill-switch)
+  - [Limits](#limits)
+  - [Share links](#share-links)
   - [More servers (nodes)](#more-servers-nodes)
   - [HTTPS](#https)
   - [Two-factor authentication](#two-factor-authentication)
@@ -178,6 +181,24 @@ A kill switch blocks a device's internet while the VPN is down, so nothing leaks
 | Android | **Settings → Network → VPN → WireGuard ⚙ → Always-on VPN** and **Block connections without VPN**. |
 | iPhone, Mac | Turn on **On-Demand** for the tunnel so it reconnects on every network. Apple has no full block for WireGuard. |
 | Linux | Download the config **with kill switch** from the device's QR code window (or `?kill_switch=true` from the API). It adds firewall rules while `wg-quick` has the tunnel up. |
+
+### Limits
+
+Choose **Limits** in a device's menu:
+
+- **Data limit**: downloads and uploads together, counted each month (starting again on the 1st) or in total until you press **Reset usage**. A device that uses it up is disconnected within ten seconds.
+- **Speed limit**: in Mbit/s, for downloads and uploads each. The device stays connected, only slower. The server's container shapes its traffic with the kernel's `tc`, so it holds even for a client that ignores it.
+- **Access until**: the device is disconnected when that day ends.
+
+A device that hits its data limit or end date keeps its config: it connects again once the limit starts over, the usage is reset or the date is moved.
+
+### Share links
+
+Choose **Share link** in a device's menu to make a link to a page for the device's owner. There they scan the QR code or download the config, find the WireGuard app for their system, and see whether they are connected, how much data is left and until when they have access. Nobody signs in, and the page never shows your name for the server, only its location.
+
+The page always has the device's current config, so a device you move to another server needs no new link. A link can stop working after a day, a week or a month, or last until you remove it. A device has one link at a time: **Make a new link** stops the old one, which is also what to do when a link reaches the wrong person, since anyone with it can use the config.
+
+Links use the panel's domain when it has one. Without one they are plain `http://`, and the config travels unencrypted, so give the panel [HTTPS](#https) before sending links.
 
 ### More servers (nodes)
 
@@ -317,13 +338,14 @@ Keep keys on your own server. A key built into a mobile app or web page can be p
 | Endpoint | |
 | --- | --- |
 | `GET /api/v1/devices` | filter with `server_id`, `external_id`, `status` (`active`, `disabled`, `expired`, `limit_reached`) |
-| `POST /api/v1/devices` | `server_id` (an ID or `"auto"`), and optionally `name`, `public_key`, `external_id`, `metadata`, `enabled`, `data_limit`, `limit_period`, `expires_at` |
+| `POST /api/v1/devices` | `server_id` (an ID or `"auto"`), and optionally `name`, `public_key`, `external_id`, `metadata`, `enabled`, `data_limit`, `limit_period`, `expires_at`, `speed_limit` |
 | `GET`, `PATCH`, `DELETE /api/v1/devices/{id}` | `PATCH` takes the fields of a create except `server_id` and `public_key`; `null` clears `metadata` or `expires_at` |
 | `GET /api/v1/devices/{id}/config` | the `.conf` file, or a PNG QR code with `?format=qr`; `?kill_switch=true` for Linux |
 | `GET /api/v1/devices/{id}/usage` | what counts toward the limit, this month, and daily and monthly traffic |
 | `POST /api/v1/devices/{id}/usage/reset` | start the count toward the data limit again from now |
 | `POST /api/v1/devices/{id}/move` | `server_id` (an ID or `"auto"`); returns the device with its new config |
-| `GET`, `PATCH`, `DELETE /api/v1/groups/{external_id}` | every device with that `external_id` at once; `PATCH` takes `enabled`, `data_limit`, `limit_period`, `expires_at`, `metadata` |
+| `GET`, `POST`, `DELETE /api/v1/devices/{id}/share` | the device's [share link](#share-links); `POST` makes a new one (optionally with `expires_at`) and returns its `url` |
+| `GET`, `PATCH`, `DELETE /api/v1/groups/{external_id}` | every device with that `external_id` at once; `PATCH` takes `enabled`, `data_limit`, `limit_period`, `expires_at`, `speed_limit`, `metadata` |
 | `POST /api/v1/groups/{external_id}/usage/reset` | reset every device in the group |
 | `GET /api/v1/servers`, `GET /api/v1/servers/{id}` | filter with `country`; each has a `country`, `city`, `device_count` and `capacity` |
 | `POST /api/v1/servers`, `PATCH`, `DELETE /api/v1/servers/{id}` | the fields of the panel's server form, plus `node_id` and `max_devices`; `DELETE` needs `?force=true` while the server has devices |
@@ -346,6 +368,7 @@ curl https://vpn.example.com/api/v1/devices \
 - **`external_id`** is your own user's ID. It need not be unique, so one user can have several devices; find them with `?external_id=`, or change them all together through `/api/v1/groups/{external_id}`. **`metadata`** is any JSON object up to 4 KB, stored as given.
 - **`public_key`**: an app that makes its own key pair sends only the public half, and the private key never reaches the panel. The returned config then has no `PrivateKey` line for the app to fill in. Without it, the panel makes the keys as it does for devices added in the panel.
 - **`data_limit`** is in bytes, downloads and uploads together. With **`limit_period: "monthly"`** (the default) the count starts again on the 1st of each month in the panel's time zone. Subscriptions rarely renew on the 1st: for those, use **`"total"`** and call `POST /api/v1/devices/{id}/usage/reset` on each renewal, together with a `PATCH` that moves `expires_at`. A reset lets a device that hit its limit connect again at once; its traffic history stays. Each device shows `period_usage` (what counts toward the limit) next to `month_usage` (the calendar month).
+- **`speed_limit`** is in kbit/s (1000 bits a second), for downloads and uploads each; `0` means none. A 20 Mbit/s plan is `20000`.
 - **`Idempotency-Key`** on a `POST` makes a retry safe: the same key with the same body returns the first reply (with `Idempotent-Replayed: true`) instead of making a second device. Keys are remembered for 24 hours, per API key.
 - **Lists** return `{"data": [...], "has_more": true}`; ask for the next page with `?after=<last id>`, and up to 200 at a time with `limit`.
 - **Errors** look like the panel's: `{"error": {"code": "validation_failed", "message": "...", "fields": {...}}}`. A full server answers `server_full`.
@@ -358,7 +381,7 @@ Changes made with a key show up in the activity log and in emails as "via API ke
 
 A site that sells monthly VPN plans, from start to end:
 
-1. A customer pays. The site's backend calls `POST /api/v1/devices` with `server_id`, `external_id: "user_123"`, `data_limit: 53687091200` (50 GB), `limit_period: "total"`, `expires_at` a month away, and an `Idempotency-Key` of the order ID. It shows the returned `config` (or fetches `/config?format=qr`).
+1. A customer pays. The site's backend calls `POST /api/v1/devices` with `server_id`, `external_id: "user_123"`, `data_limit: 53687091200` (50 GB), `limit_period: "total"`, `expires_at` a month away, and an `Idempotency-Key` of the order ID. It shows the returned `config` (or fetches `/config?format=qr`), or calls `POST /api/v1/devices/{id}/share` and emails the customer the link.
 2. The plan renews. The backend calls `/usage/reset` and `PATCH`es `expires_at` a month further.
 3. The customer uses up the 50 GB. Tunploy cuts the device off within ten seconds and posts `device.limit_reached` to the site's webhook, which emails an upgrade offer.
 4. The customer cancels. The backend lets `expires_at` pass (`device.expired` arrives) or deletes the device.

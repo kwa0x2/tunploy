@@ -18,6 +18,8 @@ import {
   ServerOff,
   KeyRound,
   KeySquare,
+  Link2,
+  Link2Off,
   Pencil,
   Plug,
   PlugZap,
@@ -196,6 +198,10 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: Plug, tone: "good", text: <>{device} can connect to {server} again</> }
     case "device.usage_reset":
       return { icon: RotateCw, tone: "good", text: <>Data usage reset for {device} on {server}</> }
+    case "device.shared":
+      return { icon: Link2, tone: "neutral", text: <>Share link made for {device} on {server}</> }
+    case "device.unshared":
+      return { icon: Link2Off, tone: "neutral", text: <>Share link removed for {device} on {server}</> }
     case "device.renamed":
       return { icon: Pencil, tone: "neutral", text: <>Device renamed to {device} on {server}</> }
     case "device.moved":

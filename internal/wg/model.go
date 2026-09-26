@@ -63,11 +63,16 @@ type Peer struct {
 	DataLimit   int64       `json:"data_limit"`
 	LimitPeriod LimitPeriod `json:"limit_period"`
 	// The limit counts from here when it is later than the period's start.
-	UsageResetAt  *time.Time `json:"usage_reset_at,omitempty"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
-	LastHandshake *time.Time `json:"last_handshake,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	UsageResetAt *time.Time `json:"usage_reset_at,omitempty"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	// kbit/s (1000 bits) each way, download and upload alike; 0 means none.
+	SpeedLimit int64 `json:"speed_limit"`
+	// Opens the device's share page; empty when it has none.
+	ShareToken     string     `json:"-"`
+	ShareExpiresAt *time.Time `json:"-"`
+	LastHandshake  *time.Time `json:"last_handshake,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 func NewInstance(name, endpoint string) Instance {

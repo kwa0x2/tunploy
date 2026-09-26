@@ -238,6 +238,12 @@
                     ],
                     "format": "date-time",
                     "description": "null clears it."
+                  },
+                  "speed_limit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000000,
+                    "description": "kbit/s (1000 bits a second), download and upload each; 0 means no limit."
                   }
                 }
               }
@@ -400,6 +406,12 @@
                     ],
                     "format": "date-time",
                     "description": "null clears it."
+                  },
+                  "speed_limit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000000,
+                    "description": "kbit/s (1000 bits a second), download and upload each; 0 means no limit."
                   }
                 }
               }
@@ -781,6 +793,184 @@
         }
       }
     },
+    "/devices/{id}/share": {
+      "get": {
+        "operationId": "getDeviceShare",
+        "summary": "Get a device's share link",
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-scope": "devices:read",
+        "description": "The link made with `POST`, expired or not.\n\nNeeds the `devices:read` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Device ID."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareLink"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "No such device, or it has no share link."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDeviceShare",
+        "summary": "Make a share link for a device",
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-scope": "devices:write",
+        "description": "A link to a page where the device's owner sees its QR code and config, how much data it has used and when its access ends, without signing in. The page always shows the current config, so it keeps working after the device is moved. Anyone with the link can use the config, so send it only to the owner.\n\nA device has one link: making a new one stops the old one working. Opening an expired link shows nothing.\n\nNeeds the `devices:write` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Device ID."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "description": "A retry with the same key within 24 hours gets the first reply back (with `Idempotent-Replayed: true`) instead of running again."
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expires_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "When the link stops working. Leave it out to keep it until it is removed."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareLink"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDeviceShare",
+        "summary": "Remove a device's share link",
+        "tags": [
+          "Devices"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-scope": "devices:write",
+        "description": "The link stops working at once. Removing a link that is not there succeeds too.\n\nNeeds the `devices:write` scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Device ID."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
     "/groups/{external_id}": {
       "get": {
         "operationId": "getGroup",
@@ -926,6 +1116,12 @@
                     ],
                     "format": "date-time",
                     "description": "null clears it."
+                  },
+                  "speed_limit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000000,
+                    "description": "kbit/s (1000 bits a second), download and upload each; 0 means no limit."
                   }
                 }
               }
@@ -2441,6 +2637,7 @@
           "period_usage",
           "usage_reset_at",
           "expires_at",
+          "speed_limit",
           "month_usage",
           "created_at",
           "updated_at"
@@ -2526,6 +2723,11 @@
             "format": "date-time",
             "description": "Access ends at this instant."
           },
+          "speed_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "kbit/s (1000 bits a second), download and upload each; 0 means no limit."
+          },
           "month_usage": {
             "allOf": [
               {
@@ -2595,6 +2797,31 @@
             "items": {
               "$ref": "#/components/schemas/Device"
             }
+          }
+        }
+      },
+      "ShareLink": {
+        "type": "object",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The page to send the device's owner. Uses the panel's domain when it has one.",
+            "examples": [
+              "https://panel.example.com/share/7QK3M2XWJH4DAVZ6NBTPLCRE5Y"
+            ]
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the link stops working; null keeps it until it is removed."
           }
         }
       },
@@ -2875,6 +3102,8 @@
           "device.expired",
           "device.unblocked",
           "device.usage_reset",
+          "device.shared",
+          "device.unshared",
           "device.connected",
           "device.disconnected",
           "server.created",

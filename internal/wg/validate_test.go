@@ -84,4 +84,11 @@ func TestPeerValidate(t *testing.T) {
 	if fields := NewPeer(1, "").Validate(); fields["name"] == "" {
 		t.Fatal("empty name should fail")
 	}
+	for _, kbit := range []int64{-1, MaxSpeedLimit + 1} {
+		p := NewPeer(1, "phone")
+		p.SpeedLimit = kbit
+		if p.Validate()["speed_limit"] == "" {
+			t.Errorf("speed limit %d should fail", kbit)
+		}
+	}
 }

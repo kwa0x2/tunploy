@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -54,12 +55,26 @@ func logRequests(next http.Handler) http.Handler {
 		}
 		slog.Log(r.Context(), level, "request",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", logPath(r.URL.Path),
 			"status", rec.status,
 			"ip", clientIP(r),
 			"duration", time.Since(start).Round(time.Millisecond).String(),
 		)
 	})
+}
+
+// A share link's token opens a working VPN config, so logs leave it out.
+func logPath(path string) string {
+	for _, prefix := range []string{"/share/", "/api/share/"} {
+		if rest, ok := strings.CutPrefix(path, prefix); ok && rest != "" {
+			_, tail, _ := strings.Cut(rest, "/")
+			if tail != "" {
+				tail = "/" + tail
+			}
+			return prefix + "…" + tail
+		}
+	}
+	return path
 }
 
 func recoverPanics(next http.Handler) http.Handler {
@@ -69,7 +84,7 @@ func recoverPanics(next http.Handler) http.Handler {
 				slog.Error("handler panicked",
 					"panic", v,
 					"method", r.Method,
-					"path", r.URL.Path,
+					"path", logPath(r.URL.Path),
 					"stack", string(debug.Stack()),
 				)
 				http.Error(w, `{"error":{"code":"internal_error","message":"something went wrong"}}`,

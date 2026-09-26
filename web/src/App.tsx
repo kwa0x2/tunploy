@@ -11,6 +11,7 @@ import { OverviewPage } from "@/pages/overview"
 import { PeersPage } from "@/pages/peers"
 import { ServerDetailPage } from "@/pages/server-detail"
 import { ServersPage } from "@/pages/servers"
+import { SharePage } from "@/pages/share"
 import { ApiKeysSettingsPage } from "@/pages/settings/api-keys"
 import { WebhooksSettingsPage } from "@/pages/settings/webhooks"
 import { BackupsSettingsPage } from "@/pages/settings/backups"
@@ -74,14 +75,23 @@ function Routing() {
   )
 }
 
+// A share link's page is for the device's owner, who never signs in.
 export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
-        <AuthProvider>
-          <Routing />
-          <Toaster />
-        </AuthProvider>
+        <Routes>
+          <Route path="/share/:token" element={<SharePage />} />
+          <Route
+            path="*"
+            element={
+              <AuthProvider>
+                <Routing />
+              </AuthProvider>
+            }
+          />
+        </Routes>
+        <Toaster />
       </BrowserRouter>
     </ThemeProvider>
   )

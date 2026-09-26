@@ -13,6 +13,11 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(unit === 0 || value >= 10 ? 0 : 1)} ${units[unit]}`
 }
 
+// kbit/s, as the panel stores speed limits.
+export function formatSpeed(kbit: number): string {
+  return kbit < 1000 ? `${kbit} kbit/s` : `${Number((kbit / 1000).toFixed(2))} Mbit/s`
+}
+
 export function formatRelative(iso: string, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000))
   if (seconds < 60) return `${seconds}s ago`

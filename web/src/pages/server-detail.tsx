@@ -8,6 +8,7 @@ import {
   Download,
   Gauge,
   HardDrive,
+  Link2,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -51,6 +52,7 @@ import {
   PeerLimitsDialog,
   PeerMoveDialog,
   PeerNameDialog,
+  PeerShareDialog,
 } from "@/components/peer-dialogs"
 import { PeerUsageDialog } from "@/components/peer-usage-dialog"
 import { DeviceIcon, InstanceStatus, Location, MonthUsage, PeerStatus } from "@/components/status"
@@ -358,6 +360,7 @@ function PeersCard({ instance, peers, error, reload }: {
   const usage = useTarget<Peer>()
   const limiting = useTarget<Peer>()
   const moving = useTarget<Peer>()
+  const sharing = useTarget<Peer>()
   const [toggling, setToggling] = useState<number>()
 
   async function toggle(peer: Peer, enabled: boolean) {
@@ -481,6 +484,10 @@ function PeersCard({ instance, peers, error, reload }: {
                               <Download />
                               Download .conf
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => sharing.show(peer)}>
+                              <Link2 />
+                              Share link
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => usage.show(peer)}>
                               <ChartColumn />
                               Usage
@@ -563,6 +570,7 @@ function PeersCard({ instance, peers, error, reload }: {
           void reload()
         }}
       />
+      <PeerShareDialog peer={sharing.target} open={sharing.open} onOpenChange={sharing.onOpenChange} />
       <PeerMoveDialog
         peer={moving.target}
         open={moving.open}

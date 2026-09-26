@@ -28,6 +28,7 @@ type apiGroupRequest struct {
 	DataLimit   *int64                    `json:"data_limit"`
 	LimitPeriod *wg.LimitPeriod           `json:"limit_period"`
 	ExpiresAt   optional[time.Time]       `json:"expires_at"`
+	SpeedLimit  *int64                    `json:"speed_limit"`
 	Metadata    optional[json.RawMessage] `json:"metadata"`
 }
 
@@ -76,7 +77,7 @@ func (s *Server) apiUpdateGroup(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	change := apiDeviceRequest{Enabled: req.Enabled, DataLimit: req.DataLimit, LimitPeriod: req.LimitPeriod,
-		ExpiresAt: req.ExpiresAt, Metadata: req.Metadata}
+		ExpiresAt: req.ExpiresAt, SpeedLimit: req.SpeedLimit, Metadata: req.Metadata}
 	next := make([]wg.Peer, len(peers))
 	for i, p := range peers {
 		next[i] = p

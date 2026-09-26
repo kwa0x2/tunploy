@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { CopyButton } from "@/components/copy-button"
 import { FormField } from "@/components/form-field"
 import { ApiError, api, peerConfigUrl } from "@/lib/api"
-import type { Instance, LimitPeriod, Peer, PeerInput } from "@/lib/api"
+import type { Instance, LimitPeriod, Peer, PeerInput, ShareLink } from "@/lib/api"
 import {
   countedSince,
   errorMessage,
@@ -27,6 +27,7 @@ import {
   locationText,
   periodTotal,
 } from "@/lib/format"
+import { cn } from "@/lib/utils"
 
 interface NameProps {
   open: boolean
@@ -79,15 +80,15 @@ function PeerNameForm({ instanceId, peer, busy, setBusy, onDone, onCancel }: {
   const [name, setName] = useState(peer?.name ?? "")
   const [limits, setLimits] = useState(limitsOf())
   const [error, setError] = useState("")
-  const [limitError, setLimitError] = useState("")
+  const [limitErrors, setLimitErrors] = useState<LimitErrors>({})
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     setError("")
-    setLimitError("")
+    setLimitErrors({})
     const input = peer ? {} : limitsInput(limits)
-    if (!input) {
-      setLimitError(badLimit)
+    if (typeof input === "string") {
+      setLimitErrors(badLimitsInput(input))
       return
     }
     setBusy(true)
@@ -101,7 +102,8 @@ function PeerNameForm({ instanceId, peer, busy, setBusy, onDone, onCancel }: {
         onDone({ warning: err.message })
         return
       }
-      if (err instanceof ApiError && err.fields.data_limit) setLimitError(err.fields.data_limit)
+      const fields = fieldErrorsOf(err)
+      if (fields) setLimitErrors(fields)
       else setError(err instanceof ApiError ? (err.fields.name ?? err.message) : errorMessage(err))
     } finally {
       setBusy(false)
@@ -120,7 +122,7 @@ function PeerNameForm({ instanceId, peer, busy, setBusy, onDone, onCancel }: {
           aria-invalid={Boolean(error)}
         />
       </FormField>
-      {!peer && <LimitFields value={limits} onChange={setLimits} error={limitError} />}
+      {!peer && <LimitFields value={limits} onChange={setLimits} errors={limitErrors} />}
       <DialogFooter>
         <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
           Cancel
@@ -143,9 +145,12 @@ interface Limits {
   unit: Unit
   period: LimitPeriod
   until: string
+  // Mbit/s
+  speed: string
 }
 
 const badLimit = "Enter a size, or leave it empty for no limit."
+const badSpeed = "Enter a speed up to 10000 Mbit/s, or leave it empty for no limit."
 
 const pad = (n: number) => String(n).padStart(2, "0")
 const dateInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -160,23 +165,42 @@ function limitsOf(peer?: Peer): Limits {
     unit,
     period: peer?.limit_period ?? "monthly",
     until: peer?.expires_at ? dateInput(new Date(new Date(peer.expires_at).getTime() - 1)) : "",
+    speed: peer?.speed_limit ? String(peer.speed_limit / 1000) : "",
   }
 }
 
-function limitsInput({
-  size: raw,
-  unit,
-  period,
-  until,
-}: Limits): Pick<PeerInput, "data_limit" | "limit_period" | "expires_at"> | null {
+type LimitsInput = Pick<PeerInput, "data_limit" | "limit_period" | "expires_at" | "speed_limit">
+
+// Which field is wrong, or the input.
+function limitsInput({ size: raw, unit, period, until, speed: rawSpeed }: Limits): LimitsInput | "size" | "speed" {
   const size = raw.trim() === "" ? 0 : Number(raw)
-  if (!Number.isFinite(size) || size < 0) return null
+  if (!Number.isFinite(size) || size < 0) return "size"
+  const speed = rawSpeed.trim() === "" ? 0 : Math.round(Number(rawSpeed) * 1000)
+  if (!Number.isFinite(speed) || speed < 0 || speed > 10_000_000) return "speed"
   let expires: string | null = null
   if (until) {
     const [y, m, d] = until.split("-").map(Number)
     expires = new Date(y, m - 1, d + 1).toISOString()
   }
-  return { data_limit: Math.round(size * unitBytes[unit]), limit_period: period, expires_at: expires }
+  return {
+    data_limit: Math.round(size * unitBytes[unit]),
+    limit_period: period,
+    expires_at: expires,
+    speed_limit: speed,
+  }
+}
+
+// A field's error from the server, as LimitFields shows them.
+function fieldErrorsOf(err: unknown): LimitErrors | undefined {
+  if (!(err instanceof ApiError)) return undefined
+  const { data_limit: size, speed_limit: speed } = err.fields
+  return size || speed ? { size, speed } : undefined
+}
+
+type LimitErrors = { size?: string; speed?: string }
+
+function badLimitsInput(which: "size" | "speed"): LimitErrors {
+  return which === "size" ? { size: badLimit } : { speed: badSpeed }
 }
 
 function presetDate(days: number, months = 0) {
@@ -195,11 +219,12 @@ const periods: { value: LimitPeriod; label: string }[] = [
   { value: "total", label: "In total" },
 ]
 
-function LimitFields({ value, onChange, error }: {
+function LimitFields({ value, onChange, errors }: {
   value: Limits
   onChange: (value: Limits) => void
-  error?: string
+  errors: LimitErrors
 }) {
+  const error = errors.size
   return (
     <>
       <FormField
@@ -253,6 +278,27 @@ function LimitFields({ value, onChange, error }: {
               {p.label}
             </Button>
           ))}
+        </div>
+      </FormField>
+      <FormField
+        id="peer-speed"
+        label="Speed limit"
+        error={errors.speed}
+        hint="Download and upload each. The device stays connected, only slower. Leave empty for no limit."
+      >
+        <div className="flex items-center gap-1.5">
+          <Input
+            id="peer-speed"
+            type="number"
+            min={0}
+            step="any"
+            inputMode="decimal"
+            placeholder="No limit"
+            value={value.speed}
+            onChange={(e) => onChange({ ...value, speed: e.target.value })}
+            aria-invalid={Boolean(errors.speed)}
+          />
+          <span className="text-muted-foreground shrink-0 text-sm">Mbit/s</span>
         </div>
       </FormField>
       <FormField
@@ -312,8 +358,9 @@ export function PeerLimitsDialog({ peer, open, onOpenChange, onSaved }: LimitsPr
         <DialogHeader>
           <DialogTitle>Limits for {peer?.name}</DialogTitle>
           <DialogDescription>
-            When a limit is hit the device is disconnected until the limit starts again or a later
-            end date. Its config keeps working after that.
+            When the data limit or end date is hit the device is disconnected until the limit starts
+            again or a later end date. Its config keeps working after that. A speed limit only slows
+            it down.
           </DialogDescription>
         </DialogHeader>
         {peer && (
@@ -343,6 +390,7 @@ function PeerLimitsForm({ peer, busy, setBusy, onDone, onCancel }: {
 }) {
   const [limits, setLimits] = useState(() => limitsOf(peer))
   const [error, setError] = useState("")
+  const [fieldErrors, setFieldErrors] = useState<LimitErrors>({})
 
   // For plans that renew on their own date rather than on the 1st.
   async function resetUsage() {
@@ -364,9 +412,10 @@ function PeerLimitsForm({ peer, busy, setBusy, onDone, onCancel }: {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     setError("")
+    setFieldErrors({})
     const input = limitsInput(limits)
-    if (!input) {
-      setError(badLimit)
+    if (typeof input === "string") {
+      setFieldErrors(badLimitsInput(input))
       return
     }
     setBusy(true)
@@ -377,7 +426,9 @@ function PeerLimitsForm({ peer, busy, setBusy, onDone, onCancel }: {
         onDone({ warning: err.message })
         return
       }
-      setError(err instanceof ApiError ? (err.fields.data_limit ?? err.message) : errorMessage(err))
+      const fields = fieldErrorsOf(err)
+      if (fields) setFieldErrors(fields)
+      else setError(errorMessage(err))
     } finally {
       setBusy(false)
     }
@@ -385,7 +436,12 @@ function PeerLimitsForm({ peer, busy, setBusy, onDone, onCancel }: {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-      <LimitFields value={limits} onChange={setLimits} error={error} />
+      <LimitFields value={limits} onChange={setLimits} errors={fieldErrors} />
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       <div className="bg-muted/50 flex flex-wrap items-center justify-between gap-2 rounded-lg p-3">
         <p className="text-sm">
           <span className="font-medium tabular-nums">{formatBytes(periodTotal(peer))}</span>{" "}
@@ -691,5 +747,158 @@ function KillSwitchHelp({ peer, fullTunnel }: { peer: Peer; fullTunnel: boolean 
         </p>
       )}
     </details>
+  )
+}
+
+interface ShareProps {
+  peer?: Peer
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+export function PeerShareDialog({ peer, open, onOpenChange }: ShareProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Share {peer?.name}</DialogTitle>
+          <DialogDescription>
+            A page where the device&apos;s owner scans its QR code and sees how much data is left,
+            without signing in. It always shows the current config, even after a move. Anyone with
+            the link can use the config, so send it only to them.
+          </DialogDescription>
+        </DialogHeader>
+        {peer && <PeerShare key={peer.id} peer={peer} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+const linkDurations = [
+  { label: "1 day", days: 1 },
+  { label: "1 week", days: 7 },
+  { label: "1 month", days: 30 },
+  { label: "Until removed", days: 0 },
+]
+
+function PeerShare({ peer }: { peer: Peer }) {
+  // undefined while loading, null when there is none.
+  const [link, setLink] = useState<ShareLink | null>()
+  const [days, setDays] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    api
+      .peerShare(peer.instance_id, peer.id)
+      .then(setLink)
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 404) setLink(null)
+        else setError(errorMessage(err))
+      })
+  }, [peer.instance_id, peer.id])
+
+  async function run(action: () => Promise<ShareLink | null>) {
+    setError("")
+    setBusy(true)
+    try {
+      setLink(await action())
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const create = () =>
+    run(() =>
+      api.createPeerShare(
+        peer.instance_id,
+        peer.id,
+        days ? new Date(Date.now() + days * 86_400_000).toISOString() : null,
+      ),
+    )
+  const remove = () => run(() => api.deletePeerShare(peer.instance_id, peer.id).then(() => null))
+  const expired = link?.expires_at && new Date(link.expires_at) <= new Date()
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {link === undefined && !error && <Skeleton className="h-8" />}
+      {link && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Input
+              readOnly
+              value={link.url}
+              aria-label="Share link"
+              onFocus={(e) => e.target.select()}
+              className="font-mono text-xs"
+            />
+            <CopyButton value={link.url} label="Copy link" />
+          </div>
+          <p className={cn("text-xs", expired ? "text-red-700 dark:text-red-400" : "text-muted-foreground")}>
+            {link.expires_at
+              ? `${expired ? "Stopped working" : "Works until"} ${formatDateTime(link.expires_at)}.`
+              : "Works until you remove it."}
+          </p>
+        </div>
+      )}
+      {link === null && <p className="text-muted-foreground text-sm">This device has no share link yet.</p>}
+      {link?.url.startsWith("http://") && (
+        <Alert>
+          <AlertDescription>
+            The link is plain HTTP, so the config travels unencrypted. Give the panel a domain under
+            Settings → Domain and make a new link.
+          </AlertDescription>
+        </Alert>
+      )}
+      {peer.key_on_client && (
+        <Alert>
+          <AlertDescription>
+            This device made its own key pair, so the page shows its usage but no QR code or
+            config.
+          </AlertDescription>
+        </Alert>
+      )}
+      {link !== undefined && (
+        <FormField
+          id="share-duration"
+          label={link ? "A new link works for" : "The link works for"}
+          hint={link ? "A new link stops the one above from working." : undefined}
+        >
+          <div role="radiogroup" aria-label="Link works for" className="flex flex-wrap gap-1.5">
+            {linkDurations.map((d) => (
+              <Button
+                key={d.days}
+                type="button"
+                size="xs"
+                role="radio"
+                aria-checked={days === d.days}
+                variant={days === d.days ? "default" : "outline"}
+                onClick={() => setDays(d.days)}
+              >
+                {d.label}
+              </Button>
+            ))}
+          </div>
+        </FormField>
+      )}
+      <DialogFooter>
+        {link && (
+          <Button type="button" variant="outline" disabled={busy} onClick={() => void remove()}>
+            Remove link
+          </Button>
+        )}
+        <Button type="button" disabled={busy || link === undefined} onClick={() => void create()}>
+          {busy && <Loader2 className="animate-spin" />}
+          {link ? "Make a new link" : "Create link"}
+        </Button>
+      </DialogFooter>
+    </div>
   )
 }

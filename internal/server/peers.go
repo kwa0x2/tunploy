@@ -27,6 +27,7 @@ type peerRequest struct {
 	DataLimit   *int64              `json:"data_limit"`
 	LimitPeriod *wg.LimitPeriod     `json:"limit_period"`
 	ExpiresAt   optional[time.Time] `json:"expires_at"`
+	SpeedLimit  *int64              `json:"speed_limit"`
 }
 
 // optional tells an explicit null, which clears a value, from a missing field.
@@ -441,9 +442,12 @@ func (req peerRequest) apply(p *wg.Peer) {
 	if req.ExpiresAt.Set {
 		p.ExpiresAt = req.ExpiresAt.Value
 	}
+	if req.SpeedLimit != nil {
+		p.SpeedLimit = *req.SpeedLimit
+	}
 }
 
-func hasLimits(p *wg.Peer) bool { return p.DataLimit > 0 || p.ExpiresAt != nil }
+func hasLimits(p *wg.Peer) bool { return p.DataLimit > 0 || p.ExpiresAt != nil || p.SpeedLimit > 0 }
 
 func limitsDetail(p *wg.Peer) string {
 	var parts []string
@@ -453,6 +457,9 @@ func limitsDetail(p *wg.Peer) string {
 			per = " in total"
 		}
 		parts = append(parts, formatBytes(p.DataLimit)+per)
+	}
+	if p.SpeedLimit > 0 {
+		parts = append(parts, formatSpeed(p.SpeedLimit))
 	}
 	if p.ExpiresAt != nil {
 		parts = append(parts, "until "+expiryText(*p.ExpiresAt))
@@ -498,6 +505,13 @@ func formatBytes(n int64) string {
 		return fmt.Sprintf("%.1f %s", v, []string{"KB", "MB", "GB", "TB"}[i])
 	}
 	return fmt.Sprintf("%.0f %s", v, []string{"KB", "MB", "GB", "TB"}[i])
+}
+
+func formatSpeed(kbit int64) string {
+	if kbit < 1000 {
+		return fmt.Sprintf("%d kbit/s", kbit)
+	}
+	return strconv.FormatFloat(float64(kbit)/1000, 'f', -1, 64) + " Mbit/s"
 }
 
 func peerWriteError(err error) error {

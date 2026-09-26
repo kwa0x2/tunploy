@@ -18,7 +18,7 @@ const instanceColumns = `id, node_id, name, address, listen_port, private_key, p
 
 const peerColumns = `id, instance_id, name, address, private_key, public_key, preshared_key,
 	enabled, data_limit, limit_period, usage_reset_at, expires_at, last_handshake, external_id, metadata,
-	created_at, updated_at`
+	speed_limit, share_token, share_expires_at, created_at, updated_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -124,11 +124,11 @@ func (s *Store) CreatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 	now := time.Now().Unix()
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO wg_peers (instance_id, name, address, private_key, public_key, preshared_key,
-			enabled, data_limit, limit_period, expires_at, external_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			enabled, data_limit, limit_period, expires_at, external_id, metadata, speed_limit, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.InstanceID, p.Name, p.Address.String(), privateKeyText(p), p.PublicKey.String(),
 		p.PresharedKey.String(), p.Enabled, p.DataLimit, string(p.LimitPeriod.OrDefault()), nullTime(p.ExpiresAt),
-		p.ExternalID, string(p.Metadata), now, now)
+		p.ExternalID, string(p.Metadata), p.SpeedLimit, now, now)
 	if err != nil {
 		return nil, writeError("create peer", err)
 	}
@@ -261,10 +261,10 @@ func (s *Store) PeerByID(ctx context.Context, id int64) (*wg.Peer, error) {
 func (s *Store) UpdatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE wg_peers SET name = ?, enabled = ?, data_limit = ?, limit_period = ?, expires_at = ?, external_id = ?,
-			metadata = ?, updated_at = ?
+			metadata = ?, speed_limit = ?, updated_at = ?
 		 WHERE id = ?`,
 		p.Name, p.Enabled, p.DataLimit, string(p.LimitPeriod.OrDefault()), nullTime(p.ExpiresAt), p.ExternalID,
-		string(p.Metadata), time.Now().Unix(), p.ID)
+		string(p.Metadata), p.SpeedLimit, time.Now().Unix(), p.ID)
 	if err != nil {
 		return nil, writeError("update peer", err)
 	}
@@ -272,6 +272,27 @@ func (s *Store) UpdatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 		return nil, err
 	}
 	return s.PeerByID(ctx, p.ID)
+}
+
+// SetPeerShare replaces the peer's share link; an empty token removes it.
+func (s *Store) SetPeerShare(ctx context.Context, id int64, token string, expires *time.Time) (*wg.Peer, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE wg_peers SET share_token = ?, share_expires_at = ? WHERE id = ?`,
+		sql.NullString{String: token, Valid: token != ""}, nullTime(expires), id)
+	if err != nil {
+		return nil, fmt.Errorf("set peer share: %w", err)
+	}
+	if err := expectOneRow(res, "set peer share"); err != nil {
+		return nil, err
+	}
+	return s.PeerByID(ctx, id)
+}
+
+// PeerByShareToken finds a link's peer, expired or not.
+func (s *Store) PeerByShareToken(ctx context.Context, token string) (*wg.Peer, error) {
+	if token == "" {
+		return nil, ErrNotFound
+	}
+	return scanPeer(s.db.QueryRowContext(ctx, `SELECT `+peerColumns+` FROM wg_peers WHERE share_token = ?`, token))
 }
 
 func (s *Store) DeletePeer(ctx context.Context, id int64) error {
@@ -317,12 +338,15 @@ func scanPeer(row rowScanner) (*wg.Peer, error) {
 		p                       wg.Peer
 		address, priv, pub, psk string
 		metadata, period        string
+		share                   sql.NullString
+		shareExpires            sql.NullInt64
 		reset                   sql.NullInt64
 		expires, handshake      sql.NullInt64
 		created, updated        int64
 	)
 	err := row.Scan(&p.ID, &p.InstanceID, &p.Name, &address, &priv, &pub, &psk,
-		&p.Enabled, &p.DataLimit, &period, &reset, &expires, &handshake, &p.ExternalID, &metadata, &created, &updated)
+		&p.Enabled, &p.DataLimit, &period, &reset, &expires, &handshake, &p.ExternalID, &metadata, &p.SpeedLimit,
+		&share, &shareExpires, &created, &updated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -348,6 +372,8 @@ func scanPeer(row rowScanner) (*wg.Peer, error) {
 	p.UsageResetAt = timeOf(reset)
 	p.ExpiresAt = timeOf(expires)
 	p.LastHandshake = timeOf(handshake)
+	p.ShareToken = share.String
+	p.ShareExpiresAt = timeOf(shareExpires)
 	p.CreatedAt = time.Unix(created, 0).UTC()
 	p.UpdatedAt = time.Unix(updated, 0).UTC()
 	return &p, nil

@@ -20,6 +20,7 @@ import {
   formatBytes,
   formatDateTime,
   formatExpiry,
+  formatSpeed,
   monthTotal,
   nextMonthStart,
   periodTotal,
@@ -100,6 +101,9 @@ function PeerUsageBody({ peer, onEditLimits }: { peer: Peer; onEditLimits: () =>
             </dd>
           ) : (
             <dd className="text-muted-foreground text-sm">No end date</dd>
+          )}
+          {peer.speed_limit > 0 && (
+            <dd className="text-muted-foreground text-xs">Up to {formatSpeed(peer.speed_limit)} each way</dd>
           )}
         </Figure>
       </dl>

@@ -93,6 +93,8 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/setup", httpx.Handler(s.handleSetupStatus))
 	mux.Handle("POST /api/auth/login", httpx.Handler(s.handleLogin))
 	mux.Handle("GET /api/https", httpx.Handler(s.handleHTTPSInfo))
+	mux.Handle("GET /api/share/{token}", noIndex(httpx.Handler(s.handleSharedDevice)))
+	mux.Handle("GET /api/share/{token}/config", noIndex(httpx.Handler(s.handleSharedConfig)))
 
 	private := http.NewServeMux()
 	private.Handle("POST /api/auth/logout", httpx.Handler(s.handleLogout))
@@ -164,6 +166,9 @@ func (s *Server) routes() http.Handler {
 	private.Handle("GET /api/instances/{id}/peers/{peerID}/usage", httpx.Handler(s.handlePeerUsage))
 	private.Handle("POST /api/instances/{id}/peers/{peerID}/usage/reset", httpx.Handler(s.handleResetPeerUsage))
 	private.Handle("POST /api/instances/{id}/peers/{peerID}/move", httpx.Handler(s.handleMovePeer))
+	private.Handle("GET /api/instances/{id}/peers/{peerID}/share", httpx.Handler(s.handleGetShare))
+	private.Handle("POST /api/instances/{id}/peers/{peerID}/share", httpx.Handler(s.handleCreateShare))
+	private.Handle("DELETE /api/instances/{id}/peers/{peerID}/share", httpx.Handler(s.handleDeleteShare))
 
 	// Unmatched paths get the JSON envelope too.
 	private.Handle("/api/", httpx.Handler(func(w http.ResponseWriter, r *http.Request) error {
@@ -173,6 +178,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/", chain(private, s.requireAuth))
 	mux.HandleFunc("GET /api/v1/openapi.json", handleOpenAPI)
 	mux.Handle("/api/v1/", s.apiRoutes())
+	mux.Handle("GET /share/", noIndex(web.Handler()))
 	mux.Handle("/", web.Handler())
 
 	return mux
