@@ -163,6 +163,7 @@ func (s *Server) routes() http.Handler {
 	private.Handle("GET /api/instances/{id}/peers/{peerID}/config", httpx.Handler(s.handlePeerConfig))
 	private.Handle("GET /api/instances/{id}/peers/{peerID}/usage", httpx.Handler(s.handlePeerUsage))
 	private.Handle("POST /api/instances/{id}/peers/{peerID}/usage/reset", httpx.Handler(s.handleResetPeerUsage))
+	private.Handle("POST /api/instances/{id}/peers/{peerID}/move", httpx.Handler(s.handleMovePeer))
 
 	// Unmatched paths get the JSON envelope too.
 	private.Handle("/api/", httpx.Handler(func(w http.ResponseWriter, r *http.Request) error {

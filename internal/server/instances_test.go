@@ -516,3 +516,27 @@ func TestPeerSavedButNotApplied(t *testing.T) {
 		t.Fatalf("the peer is saved even though the sync failed: %+v", list)
 	}
 }
+
+func TestMovePeer(t *testing.T) {
+	p := newPanel(t)
+	a := p.createInstance(map[string]any{"name": "Frankfurt"})
+	b := p.createInstance(map[string]any{"name": "Amsterdam"})
+	peer := p.createPeer(a.ID, "phone")
+	path := fmt.Sprintf("/api/instances/%d/peers/%d/move", a.ID, peer.ID)
+
+	var moved peerJSON
+	p.want(p.do("POST", path, map[string]any{"instance_id": b.ID}), http.StatusOK, &moved)
+	if moved.ID != peer.ID || moved.PublicKey != peer.PublicKey || !strings.HasPrefix(moved.Address, "10.9.0.") {
+		t.Fatalf("moved = %+v", moved)
+	}
+	var left []peerJSON
+	p.want(p.do("GET", fmt.Sprintf("/api/instances/%d/peers", a.ID), nil), http.StatusOK, &left)
+	if len(left) != 0 {
+		t.Fatalf("still on Frankfurt: %+v", left)
+	}
+
+	p.wantError(p.do("POST", path, map[string]any{"instance_id": b.ID}), http.StatusNotFound, "not_found")
+	back := fmt.Sprintf("/api/instances/%d/peers/%d/move", b.ID, peer.ID)
+	p.wantError(p.do("POST", back, map[string]any{"instance_id": b.ID}), http.StatusUnprocessableEntity, "validation_failed")
+	p.wantError(p.do("POST", back, map[string]any{"instance_id": 99}), http.StatusUnprocessableEntity, "validation_failed")
+}

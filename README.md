@@ -278,7 +278,7 @@ docker start tunploy
 
 ### API
 
-Other programs can manage devices through `/api/v1`: a site that sells VPN access, a Telegram bot, an HR tool that gives new staff a VPN. Create a key under **Settings → API keys**, choose what it may do, and copy it; the panel shows it once and keeps only its hash. Send it as a Bearer token:
+Other programs can manage devices and servers through `/api/v1`: a site that sells VPN access, a Telegram bot, an HR tool that gives new staff a VPN, a Terraform script. Create a key under **Settings → API keys**, choose what it may do, and copy it; the panel shows it once and keeps only its hash. Send it as a Bearer token:
 
 ```sh
 curl https://vpn.example.com/api/v1/servers -H "Authorization: Bearer tp_..."
@@ -289,20 +289,26 @@ Keep keys on your own server. A key built into a mobile app or web page can be p
 | Scope | Allows |
 | --- | --- |
 | `devices:read` | list devices, read their config (`.conf` or QR code) and usage |
-| `devices:write` | create, change, turn off and delete devices |
-| `servers:read` | list servers, their status and how many devices still fit |
+| `devices:write` | create, change, move, turn off and delete devices |
+| `servers:read` | list servers and nodes, their status and how many devices still fit |
+| `servers:write` | create, change and delete servers (deleting one deletes its devices) |
 | `events:read` | read device, server and node events |
 | `webhooks:write` | add, change and remove [webhooks](#webhooks) and see their deliveries |
 
 | Endpoint | |
 | --- | --- |
 | `GET /api/v1/devices` | filter with `server_id`, `external_id`, `status` (`active`, `disabled`, `expired`, `limit_reached`) |
-| `POST /api/v1/devices` | `server_id`, and optionally `name`, `public_key`, `external_id`, `metadata`, `enabled`, `data_limit`, `limit_period`, `expires_at` |
+| `POST /api/v1/devices` | `server_id` (an ID or `"auto"`), and optionally `name`, `public_key`, `external_id`, `metadata`, `enabled`, `data_limit`, `limit_period`, `expires_at` |
 | `GET`, `PATCH`, `DELETE /api/v1/devices/{id}` | `PATCH` takes the fields of a create except `server_id` and `public_key`; `null` clears `metadata` or `expires_at` |
 | `GET /api/v1/devices/{id}/config` | the `.conf` file, or a PNG QR code with `?format=qr` |
 | `GET /api/v1/devices/{id}/usage` | what counts toward the limit, this month, and daily and monthly traffic |
 | `POST /api/v1/devices/{id}/usage/reset` | start the count toward the data limit again from now |
+| `POST /api/v1/devices/{id}/move` | `server_id` (an ID or `"auto"`); returns the device with its new config |
+| `GET`, `PATCH`, `DELETE /api/v1/groups/{external_id}` | every device with that `external_id` at once; `PATCH` takes `enabled`, `data_limit`, `limit_period`, `expires_at`, `metadata` |
+| `POST /api/v1/groups/{external_id}/usage/reset` | reset every device in the group |
 | `GET /api/v1/servers`, `GET /api/v1/servers/{id}` | filter with `country`; each has a `country`, `city`, `device_count` and `capacity` |
+| `POST /api/v1/servers`, `PATCH`, `DELETE /api/v1/servers/{id}` | the fields of the panel's server form, plus `node_id` and `max_devices`; `DELETE` needs `?force=true` while the server has devices |
+| `GET /api/v1/nodes` | the machines a server can run on; the panel's own is ID 0 |
 | `GET /api/v1/events` | oldest first; keep the last `id` you saw and ask again with `?after=`. Filter with `kind`, `server_id`, `device_id` |
 | `/api/v1/webhooks` | see [Webhooks](#webhooks) |
 
@@ -318,13 +324,15 @@ curl https://vpn.example.com/api/v1/devices \
   -d '{"server_id": 1, "external_id": "user_123", "data_limit": 53687091200, "expires_at": "2026-10-25T00:00:00Z"}'
 ```
 
-- **`external_id`** is your own user's ID. It need not be unique, so one user can have several devices; find them with `?external_id=`. **`metadata`** is any JSON object up to 4 KB, stored as given.
+- **`external_id`** is your own user's ID. It need not be unique, so one user can have several devices; find them with `?external_id=`, or change them all together through `/api/v1/groups/{external_id}`. **`metadata`** is any JSON object up to 4 KB, stored as given.
 - **`public_key`**: an app that makes its own key pair sends only the public half, and the private key never reaches the panel. The returned config then has no `PrivateKey` line for the app to fill in. Without it, the panel makes the keys as it does for devices added in the panel.
 - **`data_limit`** is in bytes, downloads and uploads together. With **`limit_period: "monthly"`** (the default) the count starts again on the 1st of each month in the panel's time zone. Subscriptions rarely renew on the 1st: for those, use **`"total"`** and call `POST /api/v1/devices/{id}/usage/reset` on each renewal, together with a `PATCH` that moves `expires_at`. A reset lets a device that hit its limit connect again at once; its traffic history stays. Each device shows `period_usage` (what counts toward the limit) next to `month_usage` (the calendar month).
 - **`Idempotency-Key`** on a `POST` makes a retry safe: the same key with the same body returns the first reply (with `Idempotent-Replayed: true`) instead of making a second device. Keys are remembered for 24 hours, per API key.
 - **Lists** return `{"data": [...], "has_more": true}`; ask for the next page with `?after=<last id>`, and up to 200 at a time with `limit`.
 - **Errors** look like the panel's: `{"error": {"code": "validation_failed", "message": "...", "fields": {...}}}`. A full server answers `server_full`.
-- **Locations**: give each server a country and city in its settings (the country is guessed from the endpoint's IP when you create it). An app can list `GET /api/v1/servers?country=DE` as "Germany" and let the user pick.
+- **Locations**: give each server a country and city in its settings (the country is guessed from the endpoint's IP when you create it). An app can list `GET /api/v1/servers?country=DE` as "Germany" and let the user pick, then send `server_id: "auto"` with `country: "DE"` (or a `city`) to get the running server there with the fewest devices. No room anywhere answers `no_server_available`.
+- **Moving** a device keeps its ID, keys, limits and usage; its address and the server's endpoint and key change, so the client needs the returned config. The panel has the same under a device's menu.
+- **Bigger servers**: a server gets a /24 (253 devices) unless you create it with a larger `address` such as `10.20.0.1/20`, or with `max_devices` and let the panel pick the subnet.
 - Each key may make 10 requests a second, with bursts of up to 60; past that the reply is `429` with `Retry-After`.
 
 Changes made with a key show up in the activity log and in emails as "via API key <name>". Restoring a backup brings keys back; revoking one stops it at once.

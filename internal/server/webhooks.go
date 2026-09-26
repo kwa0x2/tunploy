@@ -31,7 +31,7 @@ const (
 
 // Every kind a webhook can subscribe to: what /api/v1/events shows.
 var webhookKinds = []string{
-	"device.created", "device.deleted", "device.renamed", "device.enabled", "device.disabled",
+	"device.created", "device.deleted", "device.renamed", "device.moved", "device.enabled", "device.disabled",
 	"device.limits_changed", "device.limit_reached", "device.expired", "device.unblocked", "device.usage_reset",
 	"device.connected", "device.disconnected",
 	"server.created", "server.deploy_failed", "server.updated", "server.deleted", "server.started",

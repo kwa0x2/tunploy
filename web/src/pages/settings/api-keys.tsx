@@ -36,8 +36,9 @@ import { cn } from "@/lib/utils"
 
 const scopes: { id: ApiScope; label: string; hint: string }[] = [
   { id: "devices:read", label: "Read devices", hint: "List devices, their configs and usage" },
-  { id: "devices:write", label: "Manage devices", hint: "Create, change, disable and delete devices" },
-  { id: "servers:read", label: "Read servers", hint: "List servers, their status and free space" },
+  { id: "devices:write", label: "Manage devices", hint: "Create, change, move, disable and delete devices" },
+  { id: "servers:read", label: "Read servers", hint: "List servers and nodes, their status and free space" },
+  { id: "servers:write", label: "Manage servers", hint: "Create, change and delete servers, and the devices on them" },
   { id: "events:read", label: "Read events", hint: "Connections and changes to devices, servers and nodes" },
   { id: "webhooks:write", label: "Manage webhooks", hint: "Add, change and remove webhooks, and see their deliveries" },
 ]

@@ -34,6 +34,8 @@ type instanceRequest struct {
 	ClientAllowedIPs    *[]string `json:"client_allowed_ips"`
 	Country             *string   `json:"country"`
 	City                *string   `json:"city"`
+	// Only on create, instead of address: the smallest subnet that fits.
+	MaxDevices *int `json:"max_devices"`
 }
 
 type instanceView struct {
@@ -75,26 +77,50 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-
-	existing, err := s.store.Instances(r.Context())
+	created, err := s.saveNewInstance(r.Context(), req)
 	if err != nil {
 		return err
+	}
+	if strings.Contains(r.Header.Get("Accept"), ndjson) {
+		return s.streamProvision(w, r, created)
+	}
+	if err := s.provision(r.Context(), created, nil); err != nil {
+		return deployError(err)
+	}
+	return s.writeInstance(w, r, http.StatusCreated, created)
+}
+
+// saveNewInstance validates a create request and stores the row; provision deploys it.
+func (s *Server) saveNewInstance(ctx context.Context, req instanceRequest) (*wg.Instance, error) {
+	existing, err := s.store.Instances(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var nodeID int64
 	if req.NodeID != nil {
 		nodeID = *req.NodeID
 	}
-	in, err := s.defaultInstance(r.Context(), existing, nodeID)
+	in, err := s.defaultInstance(ctx, existing, nodeID)
 	if errors.Is(err, store.ErrNotFound) {
-		return httpx.Invalid(map[string]string{"node_id": "no such node"})
+		return nil, httpx.Invalid(map[string]string{"node_id": "no such node"})
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fields := req.apply(&in)
 	if req.Country == nil {
-		in.Country = s.hostCountry(r.Context(), in.Endpoint)
+		in.Country = s.hostCountry(ctx, in.Endpoint)
+	}
+	if req.MaxDevices != nil {
+		switch bits, ok := subnetBitsFor(*req.MaxDevices); {
+		case req.Address != nil:
+			fields["max_devices"] = "send address or max_devices, not both"
+		case !ok:
+			fields["max_devices"] = fmt.Sprintf("max_devices must be between 1 and %d", subnetCapacity(wg.MinSubnetBits))
+		default:
+			in.Address = nextFreeSubnet(existing, bits)
+		}
 	}
 	if req.Address != nil {
 		if other := overlapping(existing, in.Address); other != nil {
@@ -102,23 +128,24 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) er
 		}
 	}
 	if err := validationError(in.Validate(), fields); err != nil {
+		return nil, err
+	}
+
+	created, err := s.store.CreateInstance(ctx, in)
+	if err != nil {
+		return nil, instanceWriteError(err)
+	}
+	return created, nil
+}
+
+// provision deploys a new instance, and takes it away again if that fails.
+func (s *Server) provision(ctx context.Context, in *wg.Instance, progress deploy.Progress) error {
+	if err := s.deploy.Provision(ctx, in.ID, progress); err != nil {
+		s.failedCreate(ctx, in, err)
 		return err
 	}
-
-	created, err := s.store.CreateInstance(r.Context(), in)
-	if err != nil {
-		return instanceWriteError(err)
-	}
-
-	if strings.Contains(r.Header.Get("Accept"), ndjson) {
-		return s.streamProvision(w, r, created)
-	}
-	if err := s.deploy.Provision(r.Context(), created.ID, nil); err != nil {
-		s.failedCreate(r.Context(), created, err)
-		return deployError(err)
-	}
-	s.record(r.Context(), instanceEvent("server.created", created))
-	return s.writeInstance(w, r, http.StatusCreated, created)
+	s.record(ctx, instanceEvent("server.created", in))
+	return nil
 }
 
 const ndjson = "application/x-ndjson"
@@ -146,11 +173,10 @@ func (s *Server) streamProvision(w http.ResponseWriter, r *http.Request, in *wg.
 		}
 	}
 
-	err := s.deploy.Provision(r.Context(), in.ID, func(step deploy.Step) {
+	err := s.provision(r.Context(), in, func(step deploy.Step) {
 		send(provisionEvent{Step: step})
 	})
 	if err != nil {
-		s.failedCreate(r.Context(), in, err)
 		ev := provisionEvent{}
 		errors.As(deployError(err), &ev.Error)
 		var boot *deploy.BootError
@@ -167,7 +193,6 @@ func (s *Server) streamProvision(w http.ResponseWriter, r *http.Request, in *wg.
 		send(provisionEvent{Error: httpx.Errorf(http.StatusInternalServerError, "internal_error", "something went wrong")})
 		return nil
 	}
-	s.record(r.Context(), instanceEvent("server.created", in))
 	send(provisionEvent{Instance: &view})
 	return nil
 }
@@ -257,7 +282,7 @@ func (s *Server) defaultInstance(ctx context.Context, existing []wg.Instance, no
 	}
 	in := wg.NewInstance("", endpoint)
 	in.NodeID = nodeID
-	in.Address = nextFreeSubnet(existing)
+	in.Address = nextFreeSubnet(existing, wg.DefaultAddress.Bits())
 	in.ListenPort = nextFreePort(existing, nodeID)
 	in.DNS = slices.Clone(settings.DefaultDNS)
 	return in, nil
@@ -288,7 +313,14 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) er
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
+	updated, err := s.updateInstance(r.Context(), current, req)
+	if err != nil {
+		return err
+	}
+	return s.writeInstance(w, r, http.StatusOK, updated)
+}
 
+func (s *Server) updateInstance(ctx context.Context, current *wg.Instance, req instanceRequest) (*wg.Instance, error) {
 	in := *current
 	fields := req.apply(&in)
 	if req.NodeID != nil && *req.NodeID != current.NodeID {
@@ -297,23 +329,26 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) er
 	if in.Address != current.Address {
 		fields["address"] = "address cannot be changed once peers may hold configs for it"
 	}
+	if req.MaxDevices != nil {
+		fields["max_devices"] = "max_devices only applies when creating a server"
+	}
 	if err := validationError(in.Validate(), fields); err != nil {
-		return err
+		return nil, err
 	}
 
-	updated, err := s.store.UpdateInstance(r.Context(), in)
+	updated, err := s.store.UpdateInstance(ctx, in)
 	if err != nil {
-		return instanceWriteError(err)
+		return nil, instanceWriteError(err)
 	}
 
 	// Port and MTU are fixed at container creation.
-	s.record(r.Context(), instanceEvent("server.updated", updated))
+	s.record(ctx, instanceEvent("server.updated", updated))
 	if updated.ListenPort != current.ListenPort || updated.MTU != current.MTU {
-		if err := s.deploy.Redeploy(r.Context(), updated.ID); err != nil {
-			return deployError(err)
+		if err := s.deploy.Redeploy(ctx, updated.ID); err != nil {
+			return nil, deployError(err)
 		}
 	}
-	return s.writeInstance(w, r, http.StatusOK, updated)
+	return updated, nil
 }
 
 func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) error {
@@ -321,16 +356,23 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	// Container first: a leftover row beats a tunnel the panel forgot. An
-	// offline node drops the orphan itself when it reconnects.
-	if err := s.deploy.Remove(r.Context(), in.ID); err != nil && !errors.Is(err, deploy.ErrNodeOffline) {
-		return deployError(err)
-	}
-	if err := s.store.DeleteInstance(r.Context(), in.ID); err != nil {
+	if err := s.deleteInstance(r.Context(), in); err != nil {
 		return err
 	}
-	s.record(r.Context(), instanceEvent("server.deleted", in))
 	return httpx.NoContent(w)
+}
+
+// Container first: a leftover row beats a tunnel the panel forgot. An
+// offline node drops the orphan itself when it reconnects.
+func (s *Server) deleteInstance(ctx context.Context, in *wg.Instance) error {
+	if err := s.deploy.Remove(ctx, in.ID); err != nil && !errors.Is(err, deploy.ErrNodeOffline) {
+		return deployError(err)
+	}
+	if err := s.store.DeleteInstance(ctx, in.ID); err != nil {
+		return err
+	}
+	s.record(ctx, instanceEvent("server.deleted", in))
+	return nil
 }
 
 func (s *Server) handleInstanceAction(kind string, action func(*deploy.Manager, context.Context, int64) error) httpx.Handler {
@@ -489,14 +531,25 @@ func overlapping(existing []wg.Instance, addr netip.Prefix) *wg.Instance {
 	return nil
 }
 
-func nextFreeSubnet(existing []wg.Instance) netip.Prefix {
+// Candidates start each 10.x block, so any size up to a /16 is aligned.
+func nextFreeSubnet(existing []wg.Instance, bits int) netip.Prefix {
 	for second := 8; second <= 255; second++ {
-		p := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(second), 0, 1}), 24)
+		p := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(second), 0, 1}), bits)
 		if overlapping(existing, p) == nil {
 			return p
 		}
 	}
-	return wg.DefaultAddress
+	return netip.PrefixFrom(wg.DefaultAddress.Addr(), bits)
+}
+
+// subnetBitsFor is the prefix of the smallest subnet, a /24 at least, that holds n devices.
+func subnetBitsFor(n int) (int, bool) {
+	for bits := wg.DefaultAddress.Bits(); bits >= wg.MinSubnetBits; bits-- {
+		if n <= subnetCapacity(bits) {
+			return bits, n >= 1
+		}
+	}
+	return 0, false
 }
 
 func nextFreePort(existing []wg.Instance, nodeID int64) int {

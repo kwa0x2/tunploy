@@ -38,7 +38,7 @@ const kinds: { family: string; kinds: string[] }[] = [
   {
     family: "Devices",
     kinds: [
-      "device.created", "device.deleted", "device.renamed", "device.enabled", "device.disabled",
+      "device.created", "device.deleted", "device.renamed", "device.moved", "device.enabled", "device.disabled",
       "device.limits_changed", "device.limit_reached", "device.expired", "device.unblocked",
       "device.usage_reset", "device.connected", "device.disconnected",
     ],

@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
+  ArrowRightLeft,
   ChartColumn,
   Download,
   Gauge,
@@ -45,7 +46,12 @@ import { CopyButton } from "@/components/copy-button"
 import { InstanceFormDialog } from "@/components/instance-form-dialog"
 import { LogsDialog } from "@/components/logs-dialog"
 import { PageHeader } from "@/components/page-header"
-import { PeerConfigDialog, PeerLimitsDialog, PeerNameDialog } from "@/components/peer-dialogs"
+import {
+  PeerConfigDialog,
+  PeerLimitsDialog,
+  PeerMoveDialog,
+  PeerNameDialog,
+} from "@/components/peer-dialogs"
 import { PeerUsageDialog } from "@/components/peer-usage-dialog"
 import { DeviceIcon, InstanceStatus, Location, MonthUsage, PeerStatus } from "@/components/status"
 import { useNow } from "@/hooks/use-now"
@@ -344,6 +350,7 @@ function PeersCard({ instance, peers, error, reload }: {
   const showing = useTarget<Peer>()
   const usage = useTarget<Peer>()
   const limiting = useTarget<Peer>()
+  const moving = useTarget<Peer>()
   const [toggling, setToggling] = useState<number>()
 
   async function toggle(peer: Peer, enabled: boolean) {
@@ -479,6 +486,10 @@ function PeersCard({ instance, peers, error, reload }: {
                               <Pencil />
                               Rename
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => moving.show(peer)}>
+                              <ArrowRightLeft />
+                              Move to server
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               variant="destructive"
@@ -541,6 +552,19 @@ function PeersCard({ instance, peers, error, reload }: {
         onSaved={({ warning }) => {
           if (warning) toast.warning(warning)
           else toast.success("Limits saved.")
+          void reload()
+        }}
+      />
+      <PeerMoveDialog
+        peer={moving.target}
+        open={moving.open}
+        onOpenChange={moving.onOpenChange}
+        onSaved={({ peer, warning }) => {
+          if (warning) toast.warning(warning)
+          if (peer) {
+            toast.success(`${peer.name} moved. Give the device its new config.`)
+            showing.show(peer)
+          }
           void reload()
         }}
       />

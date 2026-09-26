@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
@@ -297,5 +298,63 @@ func TestDeleteInstanceCascadesToPeers(t *testing.T) {
 	}
 	if err := st.DeleteInstance(ctx, in.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleting twice: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestMovePeer(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	from := createInstance(t, st, "Frankfurt", 51820)
+	to := wg.NewInstance("Amsterdam", "nl.example.com")
+	to.Address = netip.MustParsePrefix("10.9.0.1/24")
+	to.ListenPort = 51821
+	dst, err := st.CreateInstance(ctx, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := createPeer(t, st, from.ID, "phone")
+	createPeer(t, st, dst.ID, "laptop")
+
+	now := time.Now()
+	if err := st.RecordTraffic(ctx, from.ID, map[wg.Key]wg.PeerStats{p.PublicKey: {RxBytes: 500, TxBytes: 500}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordTraffic(ctx, from.ID, map[wg.Key]wg.PeerStats{p.PublicKey: {RxBytes: 900, TxBytes: 900}}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := st.MovePeer(ctx, p.ID, dst.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.ID != p.ID || moved.InstanceID != dst.ID || moved.Address != netip.MustParseAddr("10.9.0.3") ||
+		moved.PublicKey != p.PublicKey || moved.PrivateKey != p.PrivateKey {
+		t.Fatalf("moved = %+v", moved)
+	}
+
+	// The new interface starts from zero; all of its first reading counts.
+	if err := st.RecordTraffic(ctx, dst.ID, map[wg.Key]wg.PeerStats{p.PublicKey: {RxBytes: 100, TxBytes: 0}}, now); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := st.PeersMonthUsage(ctx, []int64{p.ID}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := usage[p.ID]; got.RxBytes != 500 || got.TxBytes != 400 {
+		t.Fatalf("usage after move = %+v, want the history kept and the new bytes added", got)
+	}
+
+	createPeer(t, st, from.ID, "tablet")
+	tablet := createPeer(t, st, dst.ID, "tablet-2")
+	if _, err := st.MovePeer(ctx, tablet.ID, from.ID); err != nil {
+		t.Fatal(err)
+	}
+	clash := createPeer(t, st, dst.ID, "tablet")
+	var dup *DuplicateError
+	if _, err := st.MovePeer(ctx, clash.ID, from.ID); !errors.As(err, &dup) || dup.Column != "name" {
+		t.Fatalf("name clash: %v", err)
+	}
+	if _, err := st.MovePeer(ctx, clash.ID, 999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown instance: %v", err)
 	}
 }

@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import {
   ArchiveRestore,
+  ArrowRightLeft,
   ArrowUpCircle,
   CalendarX,
   CloudUpload,
@@ -197,6 +198,8 @@ function describe(e: ActivityEvent): { icon: LucideIcon; tone: Tone; text: React
       return { icon: RotateCw, tone: "good", text: <>Data usage reset for {device} on {server}</> }
     case "device.renamed":
       return { icon: Pencil, tone: "neutral", text: <>Device renamed to {device} on {server}</> }
+    case "device.moved":
+      return { icon: ArrowRightLeft, tone: "neutral", text: <>{device} moved to {server}</> }
     case "server.created":
       return { icon: Plus, tone: "good", text: <>Server {server} created</> }
     case "server.deploy_failed":

@@ -146,7 +146,7 @@
       "url": "{{ _.base_url }}/api/api-keys",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"name\": \"insomnia\",\n  \"scopes\": [\n    \"devices:read\",\n    \"devices:write\",\n    \"servers:read\",\n    \"events:read\",\n    \"webhooks:write\"\n  ]\n}"
+        "text": "{\n  \"name\": \"insomnia\",\n  \"scopes\": [\n    \"devices:read\",\n    \"devices:write\",\n    \"servers:read\",\n    \"servers:write\",\n    \"events:read\",\n    \"webhooks:write\"\n  ]\n}"
       },
       "parameters": [],
       "headers": [
@@ -1103,6 +1103,272 @@
       "headers": [],
       "authentication": {},
       "metaSortKey": 40,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "fld_groups",
+      "_type": "request_group",
+      "parentId": "wrk_tunploy",
+      "name": "7. Groups",
+      "description": "A group is every device with the same external_id, such as one customer's phone and laptop. Set external_id in the environment.",
+      "environment": {},
+      "metaSortKey": 6
+    },
+    {
+      "_id": "req_41",
+      "_type": "request",
+      "parentId": "fld_servers",
+      "name": "Create server (sized for 1000 devices)",
+      "description": "Needs servers:write. Deploys before it answers; the reply is the running server. max_devices picks the smallest free subnet that fits (a /22 here); send address instead to choose it yourself.",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/servers",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Tokyo\",\n  \"country\": \"JP\",\n  \"city\": \"Tokyo\",\n  \"max_devices\": 1000\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Idempotency-Key",
+          "value": "{% uuid 'v4' %}"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 41,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_42",
+      "_type": "request",
+      "parentId": "fld_servers",
+      "name": "Update server",
+      "description": "A new listen_port or mtu recreates the container.",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/api/v1/servers/{{ _.server_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"city\": \"Shibuya\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 42,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_43",
+      "_type": "request",
+      "parentId": "fld_servers",
+      "name": "Delete server with its devices",
+      "description": "Without force=true a server that still has devices answers 409 server_not_empty.",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/api/v1/servers/{{ _.server_id }}?force=true",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 43,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_44",
+      "_type": "request",
+      "parentId": "fld_servers",
+      "name": "List nodes",
+      "description": "The machines node_id can name when creating a server. The panel's own is ID 0.",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/nodes",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 44,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_45",
+      "_type": "request",
+      "parentId": "fld_devices",
+      "name": "Create device on the emptiest server in a country",
+      "description": "Picks the running server in Germany with the fewest devices that still has room; 409 no_server_available when there is none.",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/devices",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"server_id\": \"auto\",\n  \"country\": \"DE\",\n  \"external_id\": \"user_123\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Idempotency-Key",
+          "value": "{% uuid 'v4' %}"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 45,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_46",
+      "_type": "request",
+      "parentId": "fld_devices",
+      "name": "Move device",
+      "description": "Keeps the ID, keys, limits and usage. The reply has the new config; the old one stops working.",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/devices/{{ _.device_id }}/move",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"server_id\": \"auto\",\n  \"country\": \"NL\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Idempotency-Key",
+          "value": "{% uuid 'v4' %}"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 46,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_47",
+      "_type": "request",
+      "parentId": "fld_groups",
+      "name": "Get group",
+      "description": "Every device with this external_id, and their usage this month together.",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/groups/{{ _.external_id }}",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 47,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_48",
+      "_type": "request",
+      "parentId": "fld_groups",
+      "name": "Renew every device in a group",
+      "description": "Checked for every device before any is saved.",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/api/v1/groups/{{ _.external_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"enabled\": true,\n  \"expires_at\": \"2026-12-31T00:00:00Z\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 48,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_49",
+      "_type": "request",
+      "parentId": "fld_groups",
+      "name": "Reset usage for a group",
+      "description": "",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/groups/{{ _.external_id }}/usage/reset",
+      "body": {},
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Idempotency-Key",
+          "value": "{% uuid 'v4' %}"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 49,
+      "settingSendCookies": true,
+      "settingStoreCookies": true
+    },
+    {
+      "_id": "req_50",
+      "_type": "request",
+      "parentId": "fld_groups",
+      "name": "Delete every device in a group",
+      "description": "",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/api/v1/groups/{{ _.external_id }}",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.api_key }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 50,
       "settingSendCookies": true,
       "settingStoreCookies": true
     }

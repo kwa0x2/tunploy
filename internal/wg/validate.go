@@ -11,7 +11,7 @@ import (
 
 const (
 	maxNameLength = 64
-	minSubnetBits = 16
+	MinSubnetBits = 16
 	maxSubnetBits = 30
 	minMTU        = 1280
 	maxMTU        = 1500
@@ -33,7 +33,7 @@ func (in Instance) Validate() map[string]string {
 		fields["address"] = "address is required"
 	case !in.Address.Addr().Is4():
 		fields["address"] = "address must be an IPv4 address with a prefix, e.g. 10.8.0.1/24"
-	case in.Address.Bits() < minSubnetBits || in.Address.Bits() > maxSubnetBits:
+	case in.Address.Bits() < MinSubnetBits || in.Address.Bits() > maxSubnetBits:
 		fields["address"] = "subnet must be between /16 and /30"
 	case !isHostAddress(in.Address):
 		fields["address"] = "address must be a host inside the subnet, not its network or broadcast address"

@@ -29,7 +29,7 @@ type Group struct {
 var Groups = []Group{
 	{ID: "servers", Kinds: []string{"server.created", "server.deploy_failed", "server.deleted", "server.down", "server.recovered",
 		"node.added", "node.deleted", "node.offline", "node.online"}},
-	{ID: "devices", Kinds: []string{"device.created", "device.deleted", "device.enabled", "device.disabled"}},
+	{ID: "devices", Kinds: []string{"device.created", "device.deleted", "device.moved", "device.enabled", "device.disabled"}},
 	{ID: "limits", Kinds: []string{"device.limit_reached", "device.expired", "device.unblocked", "device.usage_reset"}},
 	{ID: "failed_logins", Kinds: []string{"auth.login_failed"}},
 	{ID: "security", Kinds: []string{"auth.password_changed", "auth.totp_enabled", "auth.totp_disabled",
@@ -259,6 +259,8 @@ func Describe(e store.Event) string {
 		return device + " was added to " + server
 	case "device.deleted":
 		return device + " was removed from " + server
+	case "device.moved":
+		return device + " was moved to " + server
 	case "device.enabled":
 		return device + " was enabled on " + server
 	case "device.disabled":

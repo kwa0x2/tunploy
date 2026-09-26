@@ -26,12 +26,13 @@ const (
 	scopeDevicesRead  = "devices:read"
 	scopeDevicesWrite = "devices:write"
 	scopeServersRead  = "servers:read"
+	scopeServersWrite = "servers:write"
 	scopeEventsRead   = "events:read"
 	// One scope for reading too: a webhook list shows where device data goes.
 	scopeWebhooksWrite = "webhooks:write"
 )
 
-var apiScopes = []string{scopeDevicesRead, scopeDevicesWrite, scopeServersRead, scopeEventsRead, scopeWebhooksWrite}
+var apiScopes = []string{scopeDevicesRead, scopeDevicesWrite, scopeServersRead, scopeServersWrite, scopeEventsRead, scopeWebhooksWrite}
 
 const (
 	apiKeyPrefix   = "tp_"

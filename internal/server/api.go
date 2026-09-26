@@ -18,7 +18,9 @@ import (
 
 	"rsc.io/qr"
 
+	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/httpx"
+	"github.com/kwa0x2/tunploy/internal/node"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
@@ -52,9 +54,19 @@ func (s *Server) apiEndpoints() []apiEndpoint {
 		{"GET /api/v1/devices/{id}/config", scopeDevicesRead, s.apiDeviceConfig, false},
 		{"GET /api/v1/devices/{id}/usage", scopeDevicesRead, s.apiDeviceUsage, false},
 		{"POST /api/v1/devices/{id}/usage/reset", scopeDevicesWrite, s.apiResetDeviceUsage, true},
+		{"POST /api/v1/devices/{id}/move", scopeDevicesWrite, s.apiMoveDevice, true},
+
+		{"GET /api/v1/groups/{external_id}", scopeDevicesRead, s.apiGetGroup, false},
+		{"PATCH /api/v1/groups/{external_id}", scopeDevicesWrite, s.apiUpdateGroup, false},
+		{"DELETE /api/v1/groups/{external_id}", scopeDevicesWrite, s.apiDeleteGroup, false},
+		{"POST /api/v1/groups/{external_id}/usage/reset", scopeDevicesWrite, s.apiResetGroupUsage, true},
 
 		{"GET /api/v1/servers", scopeServersRead, s.apiListServers, false},
 		{"GET /api/v1/servers/{id}", scopeServersRead, s.apiGetServer, false},
+		{"POST /api/v1/servers", scopeServersWrite, s.apiCreateServer, true},
+		{"PATCH /api/v1/servers/{id}", scopeServersWrite, s.apiUpdateServer, false},
+		{"DELETE /api/v1/servers/{id}", scopeServersWrite, s.apiDeleteServer, false},
+		{"GET /api/v1/nodes", scopeServersRead, s.apiListNodes, false},
 
 		{"GET /api/v1/events", scopeEventsRead, s.apiListEvents, false},
 
@@ -140,7 +152,10 @@ type apiDevice struct {
 }
 
 type apiDeviceRequest struct {
-	ServerID    *int64                    `json:"server_id"`
+	ServerID *serverRef `json:"server_id"`
+	// Only with server_id "auto": where to look.
+	Country     *string                   `json:"country"`
+	City        *string                   `json:"city"`
 	Name        *string                   `json:"name"`
 	PublicKey   *string                   `json:"public_key"`
 	ExternalID  *string                   `json:"external_id"`
@@ -297,13 +312,7 @@ func (s *Server) apiCreateDevice(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-	if req.ServerID == nil {
-		return httpx.Invalid(map[string]string{"server_id": "server_id is required"})
-	}
-	in, err := s.store.InstanceByID(r.Context(), *req.ServerID)
-	if errors.Is(err, store.ErrNotFound) {
-		return httpx.Invalid(map[string]string{"server_id": "no such server"})
-	}
+	in, err := s.targetServer(r.Context(), req.placement(), 0)
 	if err != nil {
 		return err
 	}
@@ -339,6 +348,104 @@ func (s *Server) apiCreateDevice(w http.ResponseWriter, r *http.Request) error {
 	return httpx.JSON(w, http.StatusCreated, view)
 }
 
+// serverRef is a server's ID, or "auto" to let the panel pick one.
+type serverRef struct {
+	ID   int64
+	Auto bool
+}
+
+func (r *serverRef) UnmarshalJSON(b []byte) error {
+	if string(b) == `"auto"` {
+		r.Auto = true
+		return nil
+	}
+	if err := json.Unmarshal(b, &r.ID); err != nil {
+		return errors.New(`server_id must be a server's ID or "auto"`)
+	}
+	return nil
+}
+
+type placement struct {
+	Server  *serverRef
+	Country *string
+	City    *string
+}
+
+func (req apiDeviceRequest) placement() placement {
+	return placement{Server: req.ServerID, Country: req.Country, City: req.City}
+}
+
+// targetServer resolves where a device goes; skip is the server it is
+// leaving, which "auto" never picks.
+func (s *Server) targetServer(ctx context.Context, pl placement, skip int64) (*wg.Instance, error) {
+	if pl.Server == nil {
+		return nil, httpx.Invalid(map[string]string{"server_id": `server_id is required: a server's ID or "auto"`})
+	}
+	if !pl.Server.Auto {
+		if pl.Country != nil || pl.City != nil {
+			return nil, httpx.Invalid(map[string]string{"country": `country and city only go with server_id "auto"`})
+		}
+		in, err := s.store.InstanceByID(ctx, pl.Server.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.Invalid(map[string]string{"server_id": "no such server"})
+		}
+		return in, err
+	}
+
+	var country, city string
+	if pl.Country != nil {
+		country = strings.TrimSpace(*pl.Country)
+	}
+	if pl.City != nil {
+		city = strings.TrimSpace(*pl.City)
+	}
+	in, err := s.emptiestServer(ctx, country, city, skip)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil {
+		where := ""
+		switch {
+		case city != "":
+			where = " in " + city
+		case country != "":
+			where = " in " + strings.ToUpper(country)
+		}
+		return nil, httpx.Errorf(http.StatusConflict, "no_server_available", "no running server%s has free addresses", where)
+	}
+	return in, nil
+}
+
+// emptiestServer is the running server with the fewest devices that still
+// has room; nil when there is none.
+func (s *Server) emptiestServer(ctx context.Context, country, city string, skip int64) (*wg.Instance, error) {
+	instances, err := s.store.Instances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	instances = slices.DeleteFunc(instances, func(in wg.Instance) bool {
+		return in.ID == skip || (country != "" && !strings.EqualFold(in.Country, country)) ||
+			(city != "" && !strings.EqualFold(in.City, city))
+	})
+	counts, err := s.store.PeerCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	statuses := s.deploy.Statuses(ctx, instances)
+
+	var best *wg.Instance
+	for i, in := range instances {
+		n := counts[in.ID]
+		if statuses[in.ID].State != deploy.StateRunning || n >= capacity(in.Subnet()) {
+			continue
+		}
+		if best == nil || n < counts[best.ID] {
+			best = &instances[i]
+		}
+	}
+	return best, nil
+}
+
 // Names are unique per server, but API callers rarely care about them.
 func generatedName(externalID string) string {
 	var b [3]byte
@@ -364,8 +471,11 @@ func (s *Server) apiUpdateDevice(w http.ResponseWriter, r *http.Request) error {
 	}
 	next := *p
 	fields := req.apply(&next)
-	if req.ServerID != nil && *req.ServerID != p.InstanceID {
-		fields["server_id"] = "a device cannot move to another server"
+	if req.ServerID != nil && (req.ServerID.Auto || req.ServerID.ID != p.InstanceID) {
+		fields["server_id"] = "use POST /api/v1/devices/{id}/move to put a device on another server"
+	}
+	if req.Country != nil || req.City != nil {
+		fields["country"] = "country and city only choose a server on create or move"
 	}
 	if req.PublicKey != nil {
 		fields["public_key"] = "public_key cannot be changed; delete the device and create a new one"
@@ -481,6 +591,45 @@ func (s *Server) apiResetDeviceUsage(w http.ResponseWriter, r *http.Request) err
 	return httpx.JSON(w, http.StatusOK, view)
 }
 
+type apiMoveRequest struct {
+	ServerID *serverRef `json:"server_id"`
+	Country  *string    `json:"country"`
+	City     *string    `json:"city"`
+}
+
+// The device keeps its ID, keys, limits and history; its address and the
+// server's key and endpoint change, so the reply carries the new config.
+func (s *Server) apiMoveDevice(w http.ResponseWriter, r *http.Request) error {
+	from, p, err := s.deviceFromPath(r)
+	if err != nil {
+		return err
+	}
+	var req apiMoveRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		return err
+	}
+	to, err := s.targetServer(r.Context(), placement{Server: req.ServerID, Country: req.Country, City: req.City}, p.InstanceID)
+	if err != nil {
+		return err
+	}
+	if to.ID == from.ID {
+		return httpx.Invalid(map[string]string{"server_id": "the device is already on this server"})
+	}
+	moved, err := s.movePeer(r.Context(), from, to, p)
+	if errors.Is(err, wg.ErrSubnetFull) {
+		return httpx.Errorf(http.StatusConflict, "server_full", "server %q has no free addresses left", to.Name)
+	}
+	if err != nil {
+		return err
+	}
+	view, err := s.apiDevice(r.Context(), moved)
+	if err != nil {
+		return err
+	}
+	view.Config = string(wg.ClientConfig(*to, *moved))
+	return httpx.JSON(w, http.StatusOK, view)
+}
+
 func (s *Server) deviceFromPath(r *http.Request) (*wg.Instance, *wg.Peer, error) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -506,17 +655,22 @@ type apiNode struct {
 }
 
 type apiServer struct {
-	ID         int64        `json:"id"`
-	Name       string       `json:"name"`
-	Node       apiNode      `json:"node"`
-	Country    string       `json:"country"`
-	City       string       `json:"city"`
-	Status     string       `json:"status"`
-	Endpoint   string       `json:"endpoint"`
-	ListenPort int          `json:"listen_port"`
-	PublicKey  wg.Key       `json:"public_key"`
-	Subnet     netip.Prefix `json:"subnet"`
-	DNS        []netip.Addr `json:"dns"`
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Node       apiNode `json:"node"`
+	Country    string  `json:"country"`
+	City       string  `json:"city"`
+	Status     string  `json:"status"`
+	Endpoint   string  `json:"endpoint"`
+	ListenPort int     `json:"listen_port"`
+	PublicKey  wg.Key  `json:"public_key"`
+	// The server's own address in its subnet.
+	Address             netip.Prefix   `json:"address"`
+	Subnet              netip.Prefix   `json:"subnet"`
+	DNS                 []netip.Addr   `json:"dns"`
+	MTU                 int            `json:"mtu"`
+	PersistentKeepalive int            `json:"persistent_keepalive"`
+	ClientAllowedIPs    []netip.Prefix `json:"client_allowed_ips"`
 	// How many more devices fit is Capacity minus DeviceCount.
 	DeviceCount int       `json:"device_count"`
 	Capacity    int       `json:"capacity"`
@@ -541,29 +695,33 @@ func (s *Server) apiServers(ctx context.Context, instances []wg.Instance) ([]api
 	out := make([]apiServer, len(instances))
 	for i, in := range instances {
 		out[i] = apiServer{
-			ID:          in.ID,
-			Name:        in.Name,
-			Node:        apiNode{ID: in.NodeID, Name: names[in.NodeID]},
-			Country:     in.Country,
-			City:        in.City,
-			Status:      string(statuses[in.ID].State),
-			Endpoint:    in.Endpoint,
-			ListenPort:  in.ListenPort,
-			PublicKey:   in.PublicKey,
-			Subnet:      in.Subnet(),
-			DNS:         in.DNS,
-			DeviceCount: counts[in.ID],
-			Capacity:    capacity(in.Subnet()),
-			CreatedAt:   in.CreatedAt,
+			ID:                  in.ID,
+			Name:                in.Name,
+			Node:                apiNode{ID: in.NodeID, Name: names[in.NodeID]},
+			Country:             in.Country,
+			City:                in.City,
+			Status:              string(statuses[in.ID].State),
+			Endpoint:            in.Endpoint,
+			ListenPort:          in.ListenPort,
+			PublicKey:           in.PublicKey,
+			Address:             in.Address,
+			Subnet:              in.Subnet(),
+			DNS:                 in.DNS,
+			MTU:                 in.MTU,
+			PersistentKeepalive: in.PersistentKeepalive,
+			ClientAllowedIPs:    in.ClientAllowedIPs,
+			DeviceCount:         counts[in.ID],
+			Capacity:            capacity(in.Subnet()),
+			CreatedAt:           in.CreatedAt,
 		}
 	}
 	return out, nil
 }
 
+func capacity(subnet netip.Prefix) int { return subnetCapacity(subnet.Bits()) }
+
 // Every host address but the server's own.
-func capacity(subnet netip.Prefix) int {
-	return 1<<(32-subnet.Bits()) - 3
-}
+func subnetCapacity(bits int) int { return 1<<(32-bits) - 3 }
 
 // Few enough to list whole; country narrows them to one location.
 func (s *Server) apiListServers(w http.ResponseWriter, r *http.Request) error {
@@ -582,22 +740,124 @@ func (s *Server) apiListServers(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) apiGetServer(w http.ResponseWriter, r *http.Request) error {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		return httpx.NotFound("server not found")
-	}
-	in, err := s.store.InstanceByID(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) {
-		return httpx.NotFound("server not found")
-	}
+	in, err := s.serverFromPath(r)
 	if err != nil {
 		return err
 	}
+	return s.writeAPIServer(w, r, http.StatusOK, in)
+}
+
+func (s *Server) serverFromPath(r *http.Request) (*wg.Instance, error) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		return nil, httpx.NotFound("server not found")
+	}
+	in, err := s.store.InstanceByID(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, httpx.NotFound("server not found")
+	}
+	return in, err
+}
+
+func (s *Server) writeAPIServer(w http.ResponseWriter, r *http.Request, status int, in *wg.Instance) error {
 	views, err := s.apiServers(r.Context(), []wg.Instance{*in})
 	if err != nil {
 		return err
 	}
-	return httpx.JSON(w, http.StatusOK, views[0])
+	return httpx.JSON(w, status, views[0])
+}
+
+// Deploys before it answers, like the panel's one click: a 201 is a running
+// server, and a failed deploy leaves nothing behind.
+func (s *Server) apiCreateServer(w http.ResponseWriter, r *http.Request) error {
+	var req instanceRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		return err
+	}
+	created, err := s.saveNewInstance(r.Context(), req)
+	if err != nil {
+		return err
+	}
+	if err := s.provision(r.Context(), created, nil); err != nil {
+		return deployError(err)
+	}
+	return s.writeAPIServer(w, r, http.StatusCreated, created)
+}
+
+func (s *Server) apiUpdateServer(w http.ResponseWriter, r *http.Request) error {
+	current, err := s.serverFromPath(r)
+	if err != nil {
+		return err
+	}
+	var req instanceRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		return err
+	}
+	updated, err := s.updateInstance(r.Context(), current, req)
+	if err != nil {
+		return err
+	}
+	return s.writeAPIServer(w, r, http.StatusOK, updated)
+}
+
+// Deleting a server deletes its devices, so a server that has any needs
+// ?force=true: a stale ID in a script should not cut off paying users.
+func (s *Server) apiDeleteServer(w http.ResponseWriter, r *http.Request) error {
+	in, err := s.serverFromPath(r)
+	if err != nil {
+		return err
+	}
+	force := r.URL.Query().Get("force")
+	if force != "" && force != "true" && force != "false" {
+		return httpx.BadRequest("force must be true or false")
+	}
+	if force != "true" {
+		counts, err := s.store.PeerCounts(r.Context())
+		if err != nil {
+			return err
+		}
+		if n := counts[in.ID]; n > 0 {
+			devices := "devices"
+			if n == 1 {
+				devices = "device"
+			}
+			return httpx.Errorf(http.StatusConflict, "server_not_empty",
+				"server %q has %d %s; move them away first, or send ?force=true to delete them with it", in.Name, n, devices)
+		}
+	}
+	if err := s.deleteInstance(r.Context(), in); err != nil {
+		return err
+	}
+	return httpx.NoContent(w)
+}
+
+type apiNodeView struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Host        string     `json:"host"`
+	Status      node.State `json:"status"`
+	ServerCount int        `json:"server_count"`
+}
+
+// Read only: adding a machine takes its SSH password, which stays in the panel.
+func (s *Server) apiListNodes(w http.ResponseWriter, r *http.Request) error {
+	nodes, err := s.store.Nodes(r.Context())
+	if err != nil {
+		return err
+	}
+	counts, err := s.serverCounts(r.Context())
+	if err != nil {
+		return err
+	}
+	local, err := s.localNode(r.Context())
+	if err != nil {
+		return err
+	}
+	out := []apiNodeView{{Name: local.Name, Host: local.Host, Status: local.Status.State, ServerCount: counts[0]}}
+	for _, n := range nodes {
+		out = append(out, apiNodeView{ID: n.ID, Name: n.Name, Host: n.Host, Status: s.nodes.Status(n.ID).State, ServerCount: counts[n.ID]})
+	}
+	return httpx.JSON(w, http.StatusOK, page[apiNodeView]{Data: out})
 }
 
 type apiEvent struct {

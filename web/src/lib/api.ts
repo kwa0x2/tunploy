@@ -164,7 +164,13 @@ export interface ActivityEvent {
   actor?: string
 }
 
-export type ApiScope = "devices:read" | "devices:write" | "servers:read" | "events:read" | "webhooks:write"
+export type ApiScope =
+  | "devices:read"
+  | "devices:write"
+  | "servers:read"
+  | "servers:write"
+  | "events:read"
+  | "webhooks:write"
 
 export interface ApiKey {
   id: number
@@ -716,4 +722,6 @@ export const api = {
     request<PeerUsage>(`${peerPath(instanceId, peerId)}/usage`),
   resetPeerUsage: (instanceId: number, peerId: number) =>
     post<Peer>(`${peerPath(instanceId, peerId)}/usage/reset`),
+  movePeer: (instanceId: number, peerId: number, targetId: number) =>
+    post<Peer>(`${peerPath(instanceId, peerId)}/move`, { instance_id: targetId }),
 }

@@ -145,6 +145,55 @@ func (s *Store) CreatePeer(ctx context.Context, p wg.Peer) (*wg.Peer, error) {
 	return &p, nil
 }
 
+// MovePeer puts a peer on another instance with a new address there. The row
+// stays, so its ID, keys and usage history go with it.
+func (s *Store) MovePeer(ctx context.Context, id, instanceID int64) (*wg.Peer, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin move peer: %w", err)
+	}
+	defer tx.Rollback()
+
+	var raw string
+	err = tx.QueryRowContext(ctx, `SELECT address FROM wg_instances WHERE id = ?`, instanceID).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("load instance address: %w", err)
+	}
+	server, err := netip.ParsePrefix(raw)
+	if err != nil {
+		return nil, fmt.Errorf("instance %d has a corrupt address: %w", instanceID, err)
+	}
+	used, err := peerAddresses(ctx, tx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	addr, err := wg.NextAddress(server.Masked(), append(used, server.Addr()))
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE wg_peers SET instance_id = ?, address = ?, last_handshake = NULL, updated_at = ? WHERE id = ?`,
+		instanceID, addr.String(), time.Now().Unix(), id)
+	if err != nil {
+		return nil, writeError("move peer", err)
+	}
+	if err := expectOneRow(res, "move peer"); err != nil {
+		return nil, err
+	}
+	// The new interface counts from zero; the old reading would hide its first bytes.
+	if err := setCounters(ctx, tx, id, 0, 0); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit move peer: %w", err)
+	}
+	return s.PeerByID(ctx, id)
+}
+
 func peerAddresses(ctx context.Context, tx *sql.Tx, instanceID int64) ([]netip.Addr, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT address FROM wg_peers WHERE instance_id = ?`, instanceID)
 	if err != nil {
