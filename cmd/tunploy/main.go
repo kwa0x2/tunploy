@@ -19,12 +19,15 @@ import (
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/geoip"
 	"github.com/kwa0x2/tunploy/internal/node"
+	"github.com/kwa0x2/tunploy/internal/notify"
 	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/tlscert"
 	"github.com/kwa0x2/tunploy/internal/update"
+	"github.com/kwa0x2/tunploy/internal/webhook"
 )
 
 // version is stamped at build time with -ldflags.
@@ -101,11 +104,6 @@ func run() error {
 	}
 	defer dk.Close()
 
-	mgr, err := deploy.New(st, dk, cfg.DataDir, cfg.ContainerPrefix)
-	if err != nil {
-		return err
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -115,15 +113,48 @@ func run() error {
 		go geo.Run(ctx)
 	}
 
+	notifier := notify.New()
+	webhooks := webhook.New(st)
+	events := event.NewJournal(st, geo, notifier, webhooks)
+
+	mgr, err := deploy.New(st, dk, cfg.DataDir, cfg.ContainerPrefix, events)
+	if err != nil {
+		return err
+	}
 	certs := tlscert.New(filepath.Join(cfg.DataDir, "certs"), cfg.ACMEDirectory, cfg.HTTPSListen)
 	if cfg.HTTPSListen == "" {
 		certs.Disable("HTTPS is turned off with TUNPLOY_HTTPS=false")
 	}
-	backups := backup.NewService(st, cfg.DataDir, version)
-	updates := update.New(version, cfg.DataDir, dk, cfg.UpdateCheck)
-	nodes := node.NewPool(st)
-	handler := server.New(cfg, st, dk, mgr, nodes, backups, updates, geo, certs)
+	backups := backup.NewService(st, cfg.DataDir, version, events)
+	updates := update.New(version, cfg.DataDir, dk, cfg.UpdateCheck, events)
+	nodes := node.NewPool(st, events)
+	mgr.SetRemote(nodes.Host)
+	nodes.OnConnect(func(ctx context.Context, nodeID int64) {
+		if err := mgr.NodeUp(ctx, nodeID); err != nil && ctx.Err() == nil {
+			slog.Error("bring node in line", "node", nodeID, "error", err)
+		}
+	})
+	handler := server.New(cfg, server.Deps{
+		Store:    st,
+		Docker:   dk,
+		Deploy:   mgr,
+		Nodes:    nodes,
+		Geo:      geo,
+		HTTPS:    certs,
+		Notifier: notifier,
+		Webhooks: webhooks,
+		Events:   events,
+		Backups:  backups,
+		Updates:  updates,
+	})
 	updates.ReportLast(ctx)
+
+	if stored, err := st.Settings(ctx); err != nil {
+		slog.Error("load email and backup settings", "error", err)
+	} else {
+		notifier.Load(stored)
+		backups.Load(stored)
+	}
 
 	// Marked before any node connects, so each one rebuilds as it does.
 	rebuild := backup.RebuildPending(cfg.DataDir)
@@ -139,9 +170,9 @@ func run() error {
 		slog.Error("connect to nodes", "error", err)
 	}
 	go mgr.Watch(ctx, peerWatchInterval)
-	go handler.RunNotifications(ctx)
-	go handler.RunWebhooks(ctx)
-	go handler.RunBackups(ctx)
+	go notifier.Run(ctx)
+	go webhooks.Run(ctx)
+	go backups.Run(ctx)
 	go updates.Run(ctx)
 	go updates.EnsureHostCLI(ctx)
 	go housekeeping(ctx, st)

@@ -20,8 +20,6 @@ import (
 )
 
 type Nodes interface {
-	OnConnect(func(ctx context.Context, nodeID int64))
-	OnChange(func(node.Change))
 	Add(store.Node)
 	Remove(nodeID int64)
 	Rename(store.Node)
@@ -252,7 +250,7 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) error 
 		return nil
 	}
 	s.nodes.Add(*created)
-	s.record(r.Context(), store.Event{Kind: "node.added", NodeName: created.Name, Detail: created.Host})
+	s.events.Record(r.Context(), store.Event{Kind: "node.added", NodeName: created.Name, Detail: created.Host})
 	view := s.nodeView(*created, 0)
 	send(nodeEvent{Node: &view})
 	return nil
@@ -368,7 +366,7 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) error 
 	}
 	s.nodes.Rename(*renamed)
 	if renamed.Name != n.Name {
-		s.record(r.Context(), store.Event{Kind: "node.renamed", NodeName: renamed.Name, Detail: "was " + n.Name})
+		s.events.Record(r.Context(), store.Event{Kind: "node.renamed", NodeName: renamed.Name, Detail: "was " + n.Name})
 	}
 	counts, err := s.serverCounts(r.Context())
 	if err != nil {
@@ -418,20 +416,6 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) error 
 	if err := s.store.DeleteNode(r.Context(), n.ID); err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "node.deleted", NodeName: n.Name, Detail: n.Host})
+	s.events.Record(r.Context(), store.Event{Kind: "node.deleted", NodeName: n.Name, Detail: n.Host})
 	return httpx.NoContent(w)
-}
-
-func (s *Server) nodeChanged(c node.Change) {
-	kind := "node.online"
-	if !c.Online {
-		kind = "node.offline"
-	}
-	s.record(context.Background(), store.Event{Kind: kind, NodeName: c.Node.Name, Detail: c.Error})
-}
-
-func (s *Server) nodeConnected(ctx context.Context, nodeID int64) {
-	if err := s.deploy.NodeUp(ctx, nodeID); err != nil && ctx.Err() == nil {
-		slog.Error("bring node in line", "node", nodeID, "error", err)
-	}
 }

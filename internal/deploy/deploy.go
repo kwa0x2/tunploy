@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"github.com/moby/moby/api/types/network"
 
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
@@ -65,37 +67,20 @@ type Manager struct {
 	locksMu sync.Mutex
 	locks   map[int64]*sync.Mutex
 
-	activity     activity
-	onPeerChange func(PeerChange)
-	onPeerBlock  func(PeerBlock)
-	now          func() time.Time
+	activity activity
+	events   event.Recorder
+	now      func() time.Time
 
 	stateMu sync.Mutex
 	// What each instance's config was last written with.
 	blocked map[int64]map[int64]wg.Block
 	// Whether each instance looked down on the last watch.
-	down           map[int64]bool
-	onServerHealth func(ServerHealth)
+	down map[int64]bool
 	// Nodes to rebuild instead of reconcile when they next come up.
 	rebuild map[int64]bool
 }
 
-type ServerHealth struct {
-	InstanceID int64
-	Down       bool
-	Reason     string
-}
-
-type PeerBlock struct {
-	InstanceID int64
-	Peer       wg.Peer
-	// Empty when the peer may connect again.
-	Reason wg.Block
-	// What counted toward the limit.
-	Used wg.Traffic
-}
-
-func New(st *store.Store, dk Docker, dataDir, prefix string) (*Manager, error) {
+func New(st *store.Store, dk Docker, dataDir, prefix string, events event.Recorder) (*Manager, error) {
 	files := map[string][]byte{}
 	err := fs.WalkDir(imageFS, "image", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -117,6 +102,7 @@ func New(st *store.Store, dk Docker, dataDir, prefix string) (*Manager, error) {
 		files:    files,
 		locks:    map[int64]*sync.Mutex{},
 		activity: activity{peers: map[int64]map[wg.Key]sample{}},
+		events:   events,
 		blocked:  map[int64]map[int64]wg.Block{},
 		now:      time.Now,
 		down:     map[int64]bool{},
@@ -509,25 +495,48 @@ func (m *Manager) peerStats(ctx context.Context, h Host, in *wg.Instance) (map[w
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range m.activity.observe(in.ID, stats, in.PersistentKeepalive, m.now()) {
-		if m.onPeerChange != nil {
-			m.onPeerChange(c)
-		}
+	if changes := m.activity.observe(in.ID, stats, in.PersistentKeepalive, m.now()); len(changes) > 0 {
+		m.reportActivity(in, changes)
 	}
 	return stats, nil
 }
 
-// OnPeerChange must be set before Watch starts or requests arrive.
+// A page load can spot a change too, but the change is not the request's: it
+// must outlive it and carry no actor.
+func (m *Manager) reportActivity(in *wg.Instance, changes []PeerChange) {
+	ctx := context.Background()
+	peers, err := m.store.Peers(ctx, in.ID)
+	if err != nil {
+		return
+	}
+	for _, c := range changes {
+		i := slices.IndexFunc(peers, func(p wg.Peer) bool { return p.PublicKey == c.Key })
+		if i < 0 {
+			continue
+		}
+		kind := "device.connected"
+		if !c.Online {
+			kind = "device.disconnected"
+		}
+		e := event.ForPeer(kind, in, &peers[i])
+		e.IP = endpointHost(c.Endpoint)
+		if !c.Online && !c.OnlineSince.IsZero() {
+			e.Detail = "online for " + event.Duration(m.now().Sub(c.OnlineSince))
+		}
+		m.events.Record(ctx, e)
+	}
+}
+
+func endpointHost(endpoint string) string {
+	ap, err := netip.ParseAddrPort(endpoint)
+	if err != nil {
+		return ""
+	}
+	return ap.Addr().Unmap().String()
+}
+
 // Online is what the watcher last saw, without asking WireGuard.
 func (m *Manager) Online(instanceID int64) map[wg.Key]bool { return m.activity.online(instanceID) }
-
-func (m *Manager) OnPeerChange(fn func(PeerChange)) { m.onPeerChange = fn }
-
-// OnPeerBlock must be set before Watch starts.
-func (m *Manager) OnPeerBlock(fn func(PeerBlock)) { m.onPeerBlock = fn }
-
-// OnServerHealth must be set before Watch starts.
-func (m *Manager) OnServerHealth(fn func(ServerHealth)) { m.onServerHealth = fn }
 
 // Watch is the only caller of RecordTraffic, which needs a single writer per
 // instance. Nodes are watched side by side so a slow one delays no other.
@@ -572,7 +581,7 @@ func byNode(instances []wg.Instance) map[int64][]wg.Instance {
 }
 
 func (m *Manager) watchInstance(ctx context.Context, h Host, in *wg.Instance) error {
-	m.checkHealth(ctx, h, in.ID)
+	m.checkHealth(ctx, h, in)
 	stats, err := m.peerStats(ctx, h, in)
 	if err != nil {
 		return err
@@ -584,8 +593,8 @@ func (m *Manager) watchInstance(ctx context.Context, h Host, in *wg.Instance) er
 }
 
 // A stop from the panel exits cleanly, so only a crash loop or a failed exit counts as down.
-func (m *Manager) checkHealth(ctx context.Context, h Host, instanceID int64) {
-	ct, err := m.container(ctx, h, instanceID)
+func (m *Manager) checkHealth(ctx context.Context, h Host, in *wg.Instance) {
+	ct, err := m.container(ctx, h, in.ID)
 	if err != nil {
 		return
 	}
@@ -596,12 +605,24 @@ func (m *Manager) checkHealth(ctx context.Context, h Host, instanceID int64) {
 	down := st.State == StateRestarting || (st.State == StateStopped && st.Error != "")
 
 	m.stateMu.Lock()
-	was, known := m.down[instanceID]
-	m.down[instanceID] = down
+	was, known := m.down[in.ID]
+	m.down[in.ID] = down
 	m.stateMu.Unlock()
-	if known && was != down && m.onServerHealth != nil {
-		m.onServerHealth(ServerHealth{InstanceID: instanceID, Down: down, Reason: st.Error})
+	if !known || was == down {
+		return
 	}
+	kind := "server.recovered"
+	if down {
+		kind = "server.down"
+	}
+	e := event.ForInstance(kind, in)
+	e.Detail = st.Error
+	if in.NodeID != 0 {
+		if n, err := m.store.NodeByID(ctx, in.NodeID); err == nil {
+			e.NodeName = n.Name
+		}
+	}
+	m.events.Record(ctx, e)
 }
 
 // Limits change with time and traffic alone, so nothing else would notice.
@@ -621,15 +642,28 @@ func (m *Manager) enforceLimits(ctx context.Context, h Host, in *wg.Instance) er
 	if err := m.apply(ctx, h, in); err != nil {
 		return err
 	}
-	if !known || m.onPeerBlock == nil {
+	if !known {
 		return nil
 	}
 	for _, p := range peers {
 		if prev[p.ID] != next[p.ID] {
-			m.onPeerBlock(PeerBlock{InstanceID: in.ID, Peer: p, Reason: next[p.ID], Used: usage[p.ID]})
+			m.events.Record(ctx, m.blockEvent(in, p, next[p.ID], usage[p.ID]))
 		}
 	}
 	return nil
+}
+
+// An empty reason means the peer may connect again.
+func (m *Manager) blockEvent(in *wg.Instance, p wg.Peer, reason wg.Block, used wg.Traffic) store.Event {
+	switch reason {
+	case wg.BlockLimit:
+		e := event.ForPeer("device.limit_reached", in, &p)
+		e.Detail = fmt.Sprintf("used %s of %s %s", event.Bytes(used.Total()), event.Bytes(p.DataLimit), event.Period(p, m.now()))
+		return e
+	case wg.BlockExpired:
+		return event.ForPeer("device.expired", in, &p)
+	}
+	return event.ForPeer("device.unblocked", in, &p)
 }
 
 func (m *Manager) blockedPeers(ctx context.Context, instanceID int64) ([]wg.Peer, map[int64]wg.Traffic, map[int64]wg.Block, error) {

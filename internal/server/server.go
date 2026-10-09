@@ -11,6 +11,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/backup"
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/geoip"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/notify"
@@ -35,6 +36,7 @@ type Server struct {
 	https         HTTPS
 	notifier      *notify.Notifier
 	webhooks      *webhook.Dispatcher
+	events        event.Recorder
 	backups       *backup.Service
 	updates       *update.Service
 	loginThrottle *auth.Throttle
@@ -46,41 +48,45 @@ type Server struct {
 	stopStreams context.CancelFunc
 }
 
-// Call New before mgr.Watch, nodes.Start, bk.Run and up.Run: it hooks into their events.
-func New(cfg config.Config, st *store.Store, dk Docker, mgr *deploy.Manager, nodes Nodes, bk *backup.Service, up *update.Service, geo *geoip.DB, https HTTPS) *Server {
+// Deps are the services the handlers use; main builds each one.
+type Deps struct {
+	Store    *store.Store
+	Docker   Docker
+	Deploy   *deploy.Manager
+	Nodes    Nodes
+	Geo      *geoip.DB
+	HTTPS    HTTPS
+	Notifier *notify.Notifier
+	Webhooks *webhook.Dispatcher
+	Events   event.Recorder
+	Backups  *backup.Service
+	Updates  *update.Service
+}
+
+func New(cfg config.Config, d Deps) *Server {
 	s := &Server{
 		cfg:           cfg,
-		store:         st,
-		docker:        dk,
-		deploy:        mgr,
-		nodes:         nodes,
-		geo:           geo,
-		https:         https,
-		notifier:      notify.New(),
-		webhooks:      webhook.New(st),
-		backups:       bk,
-		updates:       up,
+		store:         d.Store,
+		docker:        d.Docker,
+		deploy:        d.Deploy,
+		nodes:         d.Nodes,
+		geo:           d.Geo,
+		https:         d.HTTPS,
+		notifier:      d.Notifier,
+		webhooks:      d.Webhooks,
+		events:        d.Events,
+		backups:       d.Backups,
+		updates:       d.Updates,
 		loginThrottle: auth.NewThrottle(loginMaxAttempts, loginWindow),
 		limiter:       newRateLimiter(),
 		lookupHost:    net.DefaultResolver.LookupHost,
 	}
-	mgr.OnPeerChange(s.peerChanged)
-	mgr.OnPeerBlock(s.peerBlocked)
-	mgr.OnServerHealth(s.serverHealth)
-	mgr.SetRemote(nodes.Host)
-	nodes.OnConnect(s.nodeConnected)
-	nodes.OnChange(s.nodeChanged)
-	bk.OnEvent(s.record)
-	up.OnEvent(s.record)
 	s.closing, s.stopStreams = context.WithCancel(context.Background())
 	s.handler = chain(s.routes(), recoverPanics, s.identifyClient, securityHeaders, logRequests)
 	return s
 }
 
 func (s *Server) Close() { s.stopStreams() }
-
-// RunWebhooks sends queued webhook deliveries until ctx ends.
-func (s *Server) RunWebhooks(ctx context.Context) { s.webhooks.Run(ctx) }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)

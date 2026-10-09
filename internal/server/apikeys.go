@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kwa0x2/tunploy/internal/auth"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
@@ -128,7 +129,7 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "apikey.created", IP: clientIP(r), Detail: apiKeyDetail(k)})
+	s.events.Record(r.Context(), store.Event{Kind: "apikey.created", IP: clientIP(r), Detail: apiKeyDetail(k)})
 	return httpx.JSON(w, http.StatusCreated, createdAPIKey{APIKey: *k, Token: token})
 }
 
@@ -148,7 +149,7 @@ func (s *Server) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	s.limiter.forget(id)
-	s.record(r.Context(), store.Event{Kind: "apikey.revoked", IP: clientIP(r), Detail: k.Name})
+	s.events.Record(r.Context(), store.Event{Kind: "apikey.revoked", IP: clientIP(r), Detail: k.Name})
 	return httpx.NoContent(w)
 }
 
@@ -165,14 +166,6 @@ type apiKeyCtx struct{}
 func apiKeyFrom(ctx context.Context) *store.APIKey {
 	k, _ := ctx.Value(apiKeyCtx{}).(*store.APIKey)
 	return k
-}
-
-// Events a key causes name it, so the activity log shows who did what.
-func actorFrom(ctx context.Context) string {
-	if k := apiKeyFrom(ctx); k != nil {
-		return "api:" + k.Name
-	}
-	return ""
 }
 
 // No cookies here, so there is nothing for CSRF to ride on.
@@ -210,7 +203,8 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 				slog.Warn("record api key use", "key", k.Name, "error", err)
 			}
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), apiKeyCtx{}, k)))
+		ctx := context.WithValue(r.Context(), apiKeyCtx{}, k)
+		next.ServeHTTP(w, r.WithContext(event.WithActor(ctx, "api:"+k.Name)))
 	})
 }
 

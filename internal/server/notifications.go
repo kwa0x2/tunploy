@@ -2,15 +2,12 @@ package server
 
 import (
 	"context"
-	"errors"
-	"log/slog"
 	"net/http"
 	"net/mail"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/notify"
 	"github.com/kwa0x2/tunploy/internal/store"
@@ -18,22 +15,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
 
-const (
-	settingNotifyEnabled  = "notify_enabled"
-	settingNotifyTo       = "notify_to"
-	settingNotifyGroups   = "notify_groups"
-	settingNotifyPanelURL = "notify_panel_url"
-	settingSMTPHost       = "smtp_host"
-	settingSMTPPort       = "smtp_port"
-	settingSMTPSecurity   = "smtp_security"
-	settingSMTPUsername   = "smtp_username"
-	// Stored as is, like the WireGuard keys: whoever reads the database owns the VPN anyway.
-	settingSMTPPassword = "smtp_password"
-	settingSMTPFrom     = "smtp_from"
-
-	defaultSMTPPort = 587
-	maxRecipients   = 10
-)
+const maxRecipients = 10
 
 type notificationSettings struct {
 	Enabled     bool          `json:"enabled"`
@@ -61,40 +43,17 @@ type notificationRequest struct {
 	Events   []string `json:"events"`
 }
 
-// RunNotifications loads the saved email settings and sends until ctx ends.
-func (s *Server) RunNotifications(ctx context.Context) {
-	stored, err := s.store.Settings(ctx)
-	if err != nil {
-		slog.Error("load notification settings", "error", err)
-	} else {
-		s.notifier.Configure(notifyConfig(stored))
-	}
-	s.notifier.Run(ctx)
-}
-
-func notificationView(stored map[string]string) notificationSettings {
-	port, _ := strconv.Atoi(stored[settingSMTPPort])
-	if port == 0 {
-		port = defaultSMTPPort
-	}
-	security := stored[settingSMTPSecurity]
-	if security == "" {
-		security = notify.SecurityStartTLS
-	}
-	groups := notify.DefaultGroups
-	if raw, ok := stored[settingNotifyGroups]; ok {
-		groups = splitList(raw)
-	}
+func notificationView(cur notify.Settings) notificationSettings {
 	return notificationSettings{
-		Enabled:     stored[settingNotifyEnabled] == "true",
-		Host:        stored[settingSMTPHost],
-		Port:        port,
-		Security:    security,
-		Username:    stored[settingSMTPUsername],
-		PasswordSet: stored[settingSMTPPassword] != "",
-		From:        stored[settingSMTPFrom],
-		To:          nonNil(splitList(stored[settingNotifyTo])),
-		Events:      nonNil(groups),
+		Enabled:     cur.Enabled,
+		Host:        cur.Host,
+		Port:        cur.Port,
+		Security:    cur.Security,
+		Username:    cur.Username,
+		PasswordSet: cur.Password != "",
+		From:        cur.From,
+		To:          nonNil(cur.To),
+		Events:      nonNil(cur.Groups),
 	}
 }
 
@@ -105,33 +64,20 @@ func nonNil(list []string) []string {
 	return list
 }
 
-// nil when email is off or not set up.
-func notifyConfig(stored map[string]string) *notify.Config {
-	v := notificationView(stored)
-	if !v.Enabled || v.Host == "" || len(v.To) == 0 {
-		return nil
+func (s *Server) notificationSettings(ctx context.Context) (notify.Settings, error) {
+	stored, err := s.store.Settings(ctx)
+	if err != nil {
+		return notify.Settings{}, err
 	}
-	return &notify.Config{
-		SMTP: notify.SMTP{
-			Host:     v.Host,
-			Port:     v.Port,
-			Security: v.Security,
-			Username: v.Username,
-			Password: stored[settingSMTPPassword],
-			From:     v.From,
-		},
-		To:       v.To,
-		Groups:   v.Events,
-		PanelURL: stored[settingNotifyPanelURL],
-	}
+	return notify.LoadSettings(stored), nil
 }
 
 func (s *Server) handleGetNotifications(w http.ResponseWriter, r *http.Request) error {
-	stored, err := s.store.Settings(r.Context())
+	cur, err := s.notificationSettings(r.Context())
 	if err != nil {
 		return err
 	}
-	v := notificationView(stored)
+	v := notificationView(cur)
 	v.Status = s.notifier.Status()
 	return httpx.JSON(w, http.StatusOK, v)
 }
@@ -141,40 +87,26 @@ func (s *Server) handleSetNotifications(w http.ResponseWriter, r *http.Request) 
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-	stored, err := s.store.Settings(r.Context())
+	cur, err := s.notificationSettings(r.Context())
 	if err != nil {
 		return err
 	}
-	cfg, fields := req.config(stored, req.Enabled)
+	cfg, fields := req.config(cur, req.Enabled)
 	if len(fields) > 0 {
 		return httpx.Invalid(fields)
 	}
-
-	values := map[string]string{
-		settingNotifyEnabled:  strconv.FormatBool(req.Enabled),
-		settingSMTPHost:       cfg.Host,
-		settingSMTPPort:       strconv.Itoa(cfg.Port),
-		settingSMTPSecurity:   cfg.Security,
-		settingSMTPUsername:   cfg.Username,
-		settingSMTPPassword:   cfg.Password,
-		settingSMTPFrom:       cfg.From,
-		settingNotifyTo:       strings.Join(cfg.To, ","),
-		settingNotifyGroups:   strings.Join(cfg.Groups, ","),
-		settingNotifyPanelURL: s.panelURL(r),
-	}
-	if err := s.store.SaveSettings(r.Context(), values); err != nil {
+	cfg.PanelURL = s.panelURL(r)
+	next := notify.Settings{Enabled: req.Enabled, Config: cfg}
+	if err := s.store.SaveSettings(r.Context(), next.Values()); err != nil {
 		return err
 	}
-	for k, v := range values {
-		stored[k] = v
-	}
-	s.notifier.Configure(notifyConfig(stored))
+	s.notifier.Configure(next.Active())
 
 	detail := "off"
 	if req.Enabled {
 		detail = "to " + strings.Join(cfg.To, ", ")
 	}
-	s.record(r.Context(), store.Event{Kind: "settings.notifications_changed", Detail: detail})
+	s.events.Record(r.Context(), store.Event{Kind: "settings.notifications_changed", Detail: detail})
 	return s.handleGetNotifications(w, r)
 }
 
@@ -184,11 +116,11 @@ func (s *Server) handleTestNotifications(w http.ResponseWriter, r *http.Request)
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-	stored, err := s.store.Settings(r.Context())
+	cur, err := s.notificationSettings(r.Context())
 	if err != nil {
 		return err
 	}
-	cfg, fields := req.config(stored, true)
+	cfg, fields := req.config(cur, true)
 	if len(fields) > 0 {
 		return httpx.Invalid(fields)
 	}
@@ -200,7 +132,7 @@ func (s *Server) handleTestNotifications(w http.ResponseWriter, r *http.Request)
 }
 
 // complete demands everything needed to send, not just well-formed values.
-func (req notificationRequest) config(stored map[string]string, complete bool) (notify.Config, map[string]string) {
+func (req notificationRequest) config(cur notify.Settings, complete bool) (notify.Config, map[string]string) {
 	fields := map[string]string{}
 	cfg := notify.Config{
 		SMTP: notify.SMTP{
@@ -208,7 +140,7 @@ func (req notificationRequest) config(stored map[string]string, complete bool) (
 			Port:     req.Port,
 			Security: req.Security,
 			Username: strings.TrimSpace(req.Username),
-			Password: stored[settingSMTPPassword],
+			Password: cur.Password,
 			From:     strings.TrimSpace(req.From),
 		},
 		Groups: []string{},
@@ -225,7 +157,7 @@ func (req notificationRequest) config(stored map[string]string, complete bool) (
 		fields["host"] = "enter a hostname such as smtp.example.com, without a port"
 	}
 	if cfg.Port == 0 {
-		cfg.Port = defaultSMTPPort
+		cfg.Port = notify.DefaultPort
 	}
 	if cfg.Port < 1 || cfg.Port > 65535 {
 		fields["port"] = "port must be between 1 and 65535"
@@ -294,27 +226,4 @@ func (s *Server) panelURL(r *http.Request) string {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
-}
-
-func (s *Server) serverHealth(h deploy.ServerHealth) {
-	ctx := context.Background()
-	in, err := s.store.InstanceByID(ctx, h.InstanceID)
-	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			slog.Error("load instance for health event", "instance", h.InstanceID, "error", err)
-		}
-		return
-	}
-	kind := "server.recovered"
-	if h.Down {
-		kind = "server.down"
-	}
-	e := instanceEvent(kind, in)
-	e.Detail = h.Reason
-	if in.NodeID != 0 {
-		if n, err := s.store.NodeByID(ctx, in.NodeID); err == nil {
-			e.NodeName = n.Name
-		}
-	}
-	s.record(ctx, e)
 }

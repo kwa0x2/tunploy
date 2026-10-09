@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/hostcli"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
@@ -69,7 +70,7 @@ type Service struct {
 	dataDir string
 	docker  Docker
 	auto    bool
-	onEvent func(context.Context, store.Event)
+	events  event.Recorder
 
 	// Overridable in tests.
 	API    string
@@ -88,18 +89,17 @@ type Service struct {
 }
 
 // With auto off, GitHub is only asked when someone presses Check.
-func New(current, dataDir string, dk Docker, auto bool) *Service {
+func New(current, dataDir string, dk Docker, auto bool, events event.Recorder) *Service {
 	return &Service{
 		current: current,
 		dataDir: dataDir,
 		docker:  dk,
 		auto:    auto,
+		events:  events,
 		API:     "https://api.github.com",
 		Client:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
-
-func (s *Service) OnEvent(fn func(context.Context, store.Event)) { s.onEvent = fn }
 
 // ReportLast records how the last update went. Call it before serving, so
 // the page waiting on an update never sees the old panel without the reason.
@@ -258,7 +258,7 @@ func (s *Service) fail(ctx context.Context, target string, err error) {
 	s.mu.Lock()
 	s.updating, s.lastErr = "", err.Error()
 	s.mu.Unlock()
-	s.emit(ctx, store.Event{Kind: "panel.update_failed", Detail: target})
+	s.events.Record(ctx, store.Event{Kind: "panel.update_failed", Detail: target})
 }
 
 // consumeResult reports what the updater wrote, once.
@@ -280,15 +280,9 @@ func (s *Service) consumeResult(ctx context.Context) bool {
 	}
 	if r.To == s.current {
 		slog.Info("tunploy updated", "from", r.From, "to", r.To)
-		s.emit(ctx, store.Event{Kind: "panel.updated", Detail: r.To})
+		s.events.Record(ctx, store.Event{Kind: "panel.updated", Detail: r.To})
 	}
 	return true
-}
-
-func (s *Service) emit(ctx context.Context, e store.Event) {
-	if s.onEvent != nil {
-		s.onEvent(context.WithoutCancel(ctx), e)
-	}
 }
 
 // The container never changes while this process lives, so a hit is kept.

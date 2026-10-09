@@ -16,9 +16,12 @@ import (
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker/dockertest"
+	"github.com/kwa0x2/tunploy/internal/event"
+	"github.com/kwa0x2/tunploy/internal/notify"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/tlscert"
 	"github.com/kwa0x2/tunploy/internal/update"
+	"github.com/kwa0x2/tunploy/internal/webhook"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -41,14 +44,28 @@ func newTestServerWithDeploy(t *testing.T, dk Docker, fk *dockertest.Fake) (*Ser
 	}
 	t.Cleanup(func() { st.Close() })
 
-	mgr, err := deploy.New(st, fk, t.TempDir(), deploy.DefaultContainerPrefix)
+	notifier := notify.New()
+	webhooks := webhook.New(st)
+	events := event.NewJournal(st, nil, notifier, webhooks)
+	mgr, err := deploy.New(st, fk, t.TempDir(), deploy.DefaultContainerPrefix, events)
 	if err != nil {
 		t.Fatalf("new deploy manager: %v", err)
 	}
+	nodes := newFakeNodes()
+	mgr.SetRemote(nodes.Host)
 	cfg := config.Config{SessionTTL: time.Hour, PublicHost: "vpn.example.com"}
-	bk := backup.NewService(st, t.TempDir(), "test")
-	up := update.New("1.0.0", t.TempDir(), &fakeSelf{}, false)
-	s := New(cfg, st, dk, mgr, newFakeNodes(), bk, up, nil, &fakeHTTPS{status: tlscert.Status{Enabled: true, State: tlscert.StateOff}})
+	s := New(cfg, Deps{
+		Store:    st,
+		Docker:   dk,
+		Deploy:   mgr,
+		Nodes:    nodes,
+		HTTPS:    &fakeHTTPS{status: tlscert.Status{Enabled: true, State: tlscert.StateOff}},
+		Notifier: notifier,
+		Webhooks: webhooks,
+		Events:   events,
+		Backups:  backup.NewService(st, t.TempDir(), "test", events),
+		Updates:  update.New("1.0.0", t.TempDir(), &fakeSelf{}, false, events),
+	})
 	s.lookupHost = func(ctx context.Context, host string) ([]string, error) {
 		if strings.HasSuffix(host, ".invalid") {
 			return nil, errors.New("no such host")

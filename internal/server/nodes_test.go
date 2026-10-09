@@ -130,7 +130,9 @@ func TestOfflineNodeCatchesUpWhenBack(t *testing.T) {
 	}
 
 	p.nodes().set(n.ID, h)
-	p.s.nodeConnected(context.Background(), n.ID)
+	if err := p.s.deploy.NodeUp(context.Background(), n.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	body, _ = h.File(configPath(remote.ID))
 	if !strings.Contains(string(body), peer.PublicKey) {
@@ -189,7 +191,7 @@ func TestCreateNodeValidates(t *testing.T) {
 		http.StatusUnprocessableEntity, "validation_failed")
 }
 
-func TestRenameNodeAndChanges(t *testing.T) {
+func TestRenameNode(t *testing.T) {
 	p := newPanel(t)
 	n, _ := p.remoteNode("Frankfurt", "203.0.113.5")
 
@@ -198,11 +200,10 @@ func TestRenameNodeAndChanges(t *testing.T) {
 	if got.Name != "FRA-1" {
 		t.Fatalf("renamed = %+v", got)
 	}
-	p.nodes().onChange(node.Change{Node: store.Node{Name: "FRA-1"}, Online: false, Error: "connection refused"})
 
 	events, _ := p.s.store.Events(context.Background(), store.EventFilter{Limit: 10})
-	if events[0].Kind != "node.offline" || events[0].NodeName != "FRA-1" || events[1].Kind != "node.renamed" {
-		t.Fatalf("events = %+v", events[:2])
+	if events[0].Kind != "node.renamed" || events[0].NodeName != "FRA-1" || events[0].Detail != "was Frankfurt" {
+		t.Fatalf("events = %+v", events[:1])
 	}
 }
 

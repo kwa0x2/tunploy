@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
@@ -106,7 +107,7 @@ func github(t *testing.T, status int, body string) string {
 func TestCheck(t *testing.T) {
 	ctx := context.Background()
 
-	s := New("1.0.0", t.TempDir(), &fakeDocker{}, false)
+	s := New("1.0.0", t.TempDir(), &fakeDocker{}, false, event.Discard)
 	s.API = github(t, http.StatusNotFound, `{"message":"Not Found"}`)
 	st, err := s.Check(ctx)
 	if err != nil || st.Latest != nil || st.Available || st.CheckedAt == nil {
@@ -139,7 +140,7 @@ func TestUnsupported(t *testing.T) {
 		{"compose", "1.0.0", &fakeDocker{self: docker.Self{Compose: "tunploy"}}, "docker compose pull"},
 		{"supported", "1.0.0", &fakeDocker{}, ""},
 	} {
-		st := New(tc.current, t.TempDir(), tc.dk, false).Status(ctx)
+		st := New(tc.current, t.TempDir(), tc.dk, false, event.Discard).Status(ctx)
 		if tc.want == "" && st.Unsupported != "" || !strings.Contains(st.Unsupported, tc.want) {
 			t.Errorf("%s: unsupported = %q", tc.name, st.Unsupported)
 		}
@@ -148,14 +149,14 @@ func TestUnsupported(t *testing.T) {
 
 func TestFailedPullIsReported(t *testing.T) {
 	ctx := context.Background()
-	s := New("1.0.0", t.TempDir(), &fakeDocker{pullErr: errors.New("manifest unknown")}, false)
-	s.API = github(t, http.StatusOK, `{"tag_name":"v1.1.0"}`)
 	var events []store.Event
 	done := make(chan struct{})
-	s.OnEvent(func(ctx context.Context, e store.Event) {
+	record := event.Func(func(ctx context.Context, e store.Event) {
 		events = append(events, e)
 		close(done)
 	})
+	s := New("1.0.0", t.TempDir(), &fakeDocker{pullErr: errors.New("manifest unknown")}, false, record)
+	s.API = github(t, http.StatusOK, `{"tag_name":"v1.1.0"}`)
 
 	if _, err := s.Check(ctx); err != nil {
 		t.Fatal(err)
@@ -179,10 +180,9 @@ func TestFailedPullIsReported(t *testing.T) {
 
 func TestVanishedUpdaterIsReported(t *testing.T) {
 	ctx := context.Background()
-	s := New("1.0.0", t.TempDir(), &fakeDocker{gone: true}, false)
-	s.API = github(t, http.StatusOK, `{"tag_name":"v1.1.0"}`)
 	done := make(chan struct{})
-	s.OnEvent(func(ctx context.Context, e store.Event) { close(done) })
+	s := New("1.0.0", t.TempDir(), &fakeDocker{gone: true}, false, event.Func(func(context.Context, store.Event) { close(done) }))
+	s.API = github(t, http.StatusOK, `{"tag_name":"v1.1.0"}`)
 
 	if _, err := s.Check(ctx); err != nil {
 		t.Fatal(err)
@@ -204,13 +204,12 @@ func TestResultIsReportedOnce(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	var kinds []string
-	record := func(ctx context.Context, e store.Event) { kinds = append(kinds, e.Kind) }
+	record := event.Func(func(ctx context.Context, e store.Event) { kinds = append(kinds, e.Kind) })
 
 	if err := WriteResult(dir, Result{From: "1.0.0", To: "1.1.0"}); err != nil {
 		t.Fatal(err)
 	}
-	updated := New("1.1.0", dir, &fakeDocker{}, false)
-	updated.OnEvent(record)
+	updated := New("1.1.0", dir, &fakeDocker{}, false, record)
 	updated.ReportLast(ctx)
 	updated.ReportLast(ctx)
 	if len(kinds) != 1 || kinds[0] != "panel.updated" {
@@ -221,8 +220,7 @@ func TestResultIsReportedOnce(t *testing.T) {
 	if err := WriteResult(dir, Result{From: "1.0.0", To: "1.1.0", Error: "the new version stopped"}); err != nil {
 		t.Fatal(err)
 	}
-	old := New("1.0.0", dir, &fakeDocker{}, false)
-	old.OnEvent(record)
+	old := New("1.0.0", dir, &fakeDocker{}, false, record)
 	old.ReportLast(ctx)
 	if len(kinds) != 1 || kinds[0] != "panel.update_failed" {
 		t.Fatalf("after rollback: %v", kinds)
@@ -247,7 +245,7 @@ func TestEnsureHostCLI(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dk := &fakeDocker{self: tc.self}
-			New("0.7.0", t.TempDir(), dk, false).EnsureHostCLI(t.Context())
+			New("0.7.0", t.TempDir(), dk, false, event.Discard).EnsureHostCLI(t.Context())
 			if got := len(dk.helpers) == 1; got != tc.want {
 				t.Fatalf("helpers = %v", dk.helpers)
 			}

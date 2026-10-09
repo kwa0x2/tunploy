@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
@@ -157,7 +158,7 @@ type Service struct {
 	tmpDir  string
 	version string
 	now     func() time.Time
-	onEvent func(context.Context, store.Event)
+	events  event.Recorder
 
 	// Held for the whole of a backup or restore; never waited on.
 	busy sync.Mutex
@@ -170,14 +171,11 @@ type Service struct {
 	retryAt    time.Time
 }
 
-func NewService(st *store.Store, dataDir, version string) *Service {
+func NewService(st *store.Store, dataDir, version string, events event.Recorder) *Service {
 	tmp := filepath.Join(dataDir, "tmp")
 	os.RemoveAll(tmp)
-	return &Service{store: st, dataDir: dataDir, tmpDir: tmp, version: version, now: time.Now}
+	return &Service{store: st, dataDir: dataDir, tmpDir: tmp, version: version, events: events, now: time.Now}
 }
-
-// OnEvent must be set before Run starts or requests arrive.
-func (s *Service) OnEvent(fn func(context.Context, store.Event)) { s.onEvent = fn }
 
 func (s *Service) DataDir() string { return s.dataDir }
 
@@ -350,7 +348,7 @@ func (s *Service) finish(ctx context.Context, obj Object, scheduled bool, err er
 	if err != nil {
 		// A bucket that stays unreachable would otherwise send an email every retry.
 		if firstFailure {
-			s.event(ctx, store.Event{Kind: "backup.failed", Detail: err.Error()})
+			s.events.Record(ctx, store.Event{Kind: "backup.failed", Detail: err.Error()})
 		}
 		return
 	}
@@ -361,13 +359,7 @@ func (s *Service) finish(ctx context.Context, obj Object, scheduled bool, err er
 	}); err != nil {
 		slog.Error("save last backup time", "error", err)
 	}
-	s.event(ctx, store.Event{Kind: "backup.created", Detail: obj.Name + " (" + FormatSize(obj.Size) + ")"})
-}
-
-func (s *Service) event(ctx context.Context, e store.Event) {
-	if s.onEvent != nil {
-		s.onEvent(context.WithoutCancel(ctx), e)
-	}
+	s.events.Record(ctx, store.Event{Kind: "backup.created", Detail: obj.Name + " (" + FormatSize(obj.Size) + ")"})
 }
 
 // Run makes scheduled backups until ctx ends.

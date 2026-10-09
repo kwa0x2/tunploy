@@ -113,7 +113,7 @@ func (s *Server) handleSetDomain(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.https.Configure(domain, email)
-	s.record(r.Context(), store.Event{Kind: "settings.domain_changed", IP: clientIP(r), Detail: domain})
+	s.events.Record(r.Context(), store.Event{Kind: "settings.domain_changed", IP: clientIP(r), Detail: domain})
 
 	if domain == "" {
 		return httpx.JSON(w, http.StatusOK, s.https.Status())

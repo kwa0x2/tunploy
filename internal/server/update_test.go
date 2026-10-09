@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/update"
 )
 
@@ -116,7 +117,7 @@ func TestUpdateNeedsSignIn(t *testing.T) {
 
 func newUpdateService(t *testing.T, dk update.Docker, api string) *update.Service {
 	t.Helper()
-	up := update.New("1.0.0", t.TempDir(), dk, false)
+	up := update.New("1.0.0", t.TempDir(), dk, false, event.Discard)
 	up.API = api
 	return up
 }

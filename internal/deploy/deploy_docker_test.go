@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
@@ -47,7 +48,7 @@ func newDockerFixture(t *testing.T, ctx context.Context) *dockerFixture {
 	t.Cleanup(func() { st.Close() })
 
 	prefix := fmt.Sprintf("tunploy-test-%08x-", rand.Uint32())
-	m, err := New(st, dk, t.TempDir(), prefix)
+	m, err := New(st, dk, t.TempDir(), prefix, event.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,8 +163,8 @@ func TestPeerActivityAgainstDocker(t *testing.T) {
 	// Short, so going offline takes seconds: the window is 2*keepalive+10s.
 	in := f.instance(t, ctx, 2)
 
-	changes := make(chan PeerChange, 16)
-	f.m.OnPeerChange(func(c PeerChange) { changes <- c })
+	changes := make(chan store.Event, 16)
+	f.m.events = event.Func(func(_ context.Context, e store.Event) { changes <- e })
 
 	peer := wg.NewPeer(in.ID, "phone")
 	peer.Address = netip.MustParseAddr("10.8.0.2")
@@ -219,8 +220,8 @@ func TestPeerActivityAgainstDocker(t *testing.T) {
 	}
 
 	online := waitForChange(t, f.m, in, changes, 30*time.Second)
-	if !online.Online || online.Key != created.PublicKey || online.Endpoint == "" || online.OnlineSince.IsZero() {
-		t.Fatalf("want the device reported online with its endpoint, got %+v", online)
+	if online.Kind != "device.connected" || online.PeerID != created.ID || online.IP == "" {
+		t.Fatalf("want the device reported online with its address, got %+v", online)
 	}
 	if out, err := f.dk.Exec(ctx, client, []string{"ping", "-c", "1", "-W", "2", in.Address.Addr().String()}); err != nil {
 		t.Fatalf("ping through the tunnel: %v\n%s", err, out)
@@ -230,13 +231,13 @@ func TestPeerActivityAgainstDocker(t *testing.T) {
 		t.Fatalf("stop client: %v", err)
 	}
 	offline := waitForChange(t, f.m, in, changes, 40*time.Second)
-	if offline.Online || offline.Key != created.PublicKey {
+	if offline.Kind != "device.disconnected" || offline.PeerID != created.ID || !strings.HasPrefix(offline.Detail, "online for ") {
 		t.Fatalf("want the device reported offline, got %+v", offline)
 	}
 }
 
 // Polls like Watch does until PeerStats reports a change.
-func waitForChange(t *testing.T, m *Manager, in *wg.Instance, changes <-chan PeerChange, within time.Duration) PeerChange {
+func waitForChange(t *testing.T, m *Manager, in *wg.Instance, changes <-chan store.Event, within time.Duration) store.Event {
 	t.Helper()
 	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
@@ -250,7 +251,7 @@ func waitForChange(t *testing.T, m *Manager, in *wg.Instance, changes <-chan Pee
 		}
 	}
 	t.Fatalf("no peer change within %s", within)
-	return PeerChange{}
+	return store.Event{}
 }
 
 func waitForState(t *testing.T, m *Manager, id int64, want State) {

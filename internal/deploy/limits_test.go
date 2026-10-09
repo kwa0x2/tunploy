@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
 
@@ -19,8 +20,6 @@ func TestWatchEnforcesLimits(t *testing.T) {
 
 	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.Local)
 	f.m.now = func() time.Time { return now }
-	var blocks []PeerBlock
-	f.m.OnPeerBlock(func(b PeerBlock) { blocks = append(blocks, b) })
 
 	capped := wg.NewPeer(in.ID, "capped")
 	capped.DataLimit = 1000
@@ -52,6 +51,9 @@ func TestWatchEnforcesLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	blocks := func() []store.Event {
+		return f.eventsOf("device.limit_reached", "device.expired", "device.unblocked")
+	}
 	config := func() string {
 		body, err := os.ReadFile(filepath.Join(f.m.ConfigDir(in.ID), "wg0.conf"))
 		if err != nil {
@@ -63,14 +65,15 @@ func TestWatchEnforcesLimits(t *testing.T) {
 	watch()
 	rx = 999
 	watch()
-	if len(blocks) != 0 || !strings.Contains(config(), capped.PublicKey.String()) {
-		t.Fatalf("blocked under the limit: %+v", blocks)
+	if len(blocks()) != 0 || !strings.Contains(config(), capped.PublicKey.String()) {
+		t.Fatalf("blocked under the limit: %+v", blocks())
 	}
 
 	rx = 1000
 	watch()
-	if len(blocks) != 1 || blocks[0].Peer.ID != capped.ID || blocks[0].Reason != wg.BlockLimit || blocks[0].Used.RxBytes != 1000 {
-		t.Fatalf("blocks = %+v", blocks)
+	if b := blocks(); len(b) != 1 || b[0].Kind != "device.limit_reached" || b[0].PeerID != capped.ID ||
+		b[0].Detail != "used 1000 B of 1000 B this month" {
+		t.Fatalf("blocks = %+v", b)
 	}
 	if strings.Contains(config(), capped.PublicKey.String()) {
 		t.Fatal("a peer over its limit is still in the config")
@@ -78,20 +81,20 @@ func TestWatchEnforcesLimits(t *testing.T) {
 
 	syncs := countSyncs(f)
 	watch()
-	if len(blocks) != 1 || countSyncs(f) != syncs {
+	if len(blocks()) != 1 || countSyncs(f) != syncs {
 		t.Fatal("an unchanged block should not be applied again")
 	}
 
 	now = until
 	watch()
-	if len(blocks) != 2 || blocks[1].Peer.ID != guest.ID || blocks[1].Reason != wg.BlockExpired {
-		t.Fatalf("blocks = %+v", blocks)
+	if b := blocks(); len(b) != 2 || b[1].Kind != "device.expired" || b[1].PeerID != guest.ID {
+		t.Fatalf("blocks = %+v", b)
 	}
 
 	now = time.Date(2026, 10, 1, 0, 0, 5, 0, time.Local)
 	watch()
-	if len(blocks) != 3 || blocks[2].Peer.ID != capped.ID || blocks[2].Reason != "" {
-		t.Fatalf("a new month should let the peer back in: %+v", blocks)
+	if b := blocks(); len(b) != 3 || b[2].Kind != "device.unblocked" || b[2].PeerID != capped.ID {
+		t.Fatalf("a new month should let the peer back in: %+v", b)
 	}
 	if !strings.Contains(config(), capped.PublicKey.String()) || strings.Contains(config(), guest.PublicKey.String()) {
 		t.Fatalf("config after the month turned:\n%s", config())

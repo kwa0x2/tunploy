@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
@@ -253,11 +254,11 @@ func (s *Server) createPeer(ctx context.Context, in *wg.Instance, p wg.Peer) (*w
 		}
 		return nil, peerWriteError(err)
 	}
-	e := peerEvent("device.created", in, created)
-	if hasLimits(created) {
-		e.Detail = limitsDetail(created)
+	e := event.ForPeer("device.created", in, created)
+	if event.HasLimits(created) {
+		e.Detail = event.Limits(created)
 	}
-	s.record(ctx, e)
+	s.events.Record(ctx, e)
 	if err := s.deploy.Apply(ctx, in.ID); err != nil {
 		return created, applyError(err)
 	}
@@ -285,21 +286,21 @@ func (s *Server) savePeer(ctx context.Context, in *wg.Instance, before, p wg.Pee
 		return nil, peerWriteError(err)
 	}
 	if updated.Name != before.Name {
-		e := peerEvent("device.renamed", in, updated)
+		e := event.ForPeer("device.renamed", in, updated)
 		e.Detail = "was " + before.Name
-		s.record(ctx, e)
+		s.events.Record(ctx, e)
 	}
 	if updated.Enabled != before.Enabled {
 		kind := "device.disabled"
 		if updated.Enabled {
 			kind = "device.enabled"
 		}
-		s.record(ctx, peerEvent(kind, in, updated))
+		s.events.Record(ctx, event.ForPeer(kind, in, updated))
 	}
-	if limitsDetail(updated) != limitsDetail(&before) {
-		e := peerEvent("device.limits_changed", in, updated)
-		e.Detail = limitsDetail(updated)
-		s.record(ctx, e)
+	if event.Limits(updated) != event.Limits(&before) {
+		e := event.ForPeer("device.limits_changed", in, updated)
+		e.Detail = event.Limits(updated)
+		s.events.Record(ctx, e)
 	}
 	return updated, nil
 }
@@ -325,9 +326,9 @@ func (s *Server) saveUsageReset(ctx context.Context, in *wg.Instance, p *wg.Peer
 	if err != nil {
 		return nil, err
 	}
-	e := peerEvent("device.usage_reset", in, reset)
-	e.Detail = fmt.Sprintf("%s used %s", formatBytes(used[p.ID].Total()), periodText(*p))
-	s.record(ctx, e)
+	e := event.ForPeer("device.usage_reset", in, reset)
+	e.Detail = fmt.Sprintf("%s used %s", event.Bytes(used[p.ID].Total()), event.Period(*p, time.Now()))
+	s.events.Record(ctx, e)
 	return reset, nil
 }
 
@@ -343,9 +344,9 @@ func (s *Server) movePeer(ctx context.Context, from, to *wg.Instance, p *wg.Peer
 	case err != nil:
 		return nil, err
 	}
-	e := peerEvent("device.moved", to, moved)
+	e := event.ForPeer("device.moved", to, moved)
 	e.Detail = "from " + from.Name
-	s.record(ctx, e)
+	s.events.Record(ctx, e)
 	if err := errors.Join(s.deploy.Apply(ctx, from.ID), s.deploy.Apply(ctx, to.ID)); err != nil {
 		return moved, applyError(err)
 	}
@@ -366,7 +367,7 @@ func (s *Server) removePeer(ctx context.Context, in *wg.Instance, p *wg.Peer) er
 	if err := s.store.DeletePeer(ctx, p.ID); err != nil {
 		return err
 	}
-	s.record(ctx, peerEvent("device.deleted", in, p))
+	s.events.Record(ctx, event.ForPeer("device.deleted", in, p))
 	return nil
 }
 
@@ -445,73 +446,6 @@ func (req peerRequest) apply(p *wg.Peer) {
 	if req.SpeedLimit != nil {
 		p.SpeedLimit = *req.SpeedLimit
 	}
-}
-
-func hasLimits(p *wg.Peer) bool { return p.DataLimit > 0 || p.ExpiresAt != nil || p.SpeedLimit > 0 }
-
-func limitsDetail(p *wg.Peer) string {
-	var parts []string
-	if p.DataLimit > 0 {
-		per := " a month"
-		if p.LimitPeriod == wg.PeriodTotal {
-			per = " in total"
-		}
-		parts = append(parts, formatBytes(p.DataLimit)+per)
-	}
-	if p.SpeedLimit > 0 {
-		parts = append(parts, formatSpeed(p.SpeedLimit))
-	}
-	if p.ExpiresAt != nil {
-		parts = append(parts, "until "+expiryText(*p.ExpiresAt))
-	}
-	if len(parts) == 0 {
-		return "no limits"
-	}
-	return strings.Join(parts, ", ")
-}
-
-// periodText finishes "used 3 GB of 5 GB …".
-func periodText(p wg.Peer) string {
-	monthly := p.LimitPeriod != wg.PeriodTotal
-	if r := p.UsageResetAt; r != nil && (!monthly || !r.Before(store.MonthStart(time.Now()))) {
-		return "since " + r.In(time.Local).Format("2 Jan 2006 15:04")
-	}
-	if monthly {
-		return "this month"
-	}
-	return "in total"
-}
-
-// The panel sets expiries at midnight, which reads better as the day before.
-func expiryText(t time.Time) string {
-	t = t.In(time.Local)
-	if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 {
-		return "the end of " + t.AddDate(0, 0, -1).Format("2 Jan 2006")
-	}
-	return t.Format("2 Jan 2006 15:04")
-}
-
-func formatBytes(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	v, i := float64(n)/unit, 0
-	for v >= unit && i < 3 {
-		v /= unit
-		i++
-	}
-	if v < 10 && v != float64(int64(v)) {
-		return fmt.Sprintf("%.1f %s", v, []string{"KB", "MB", "GB", "TB"}[i])
-	}
-	return fmt.Sprintf("%.0f %s", v, []string{"KB", "MB", "GB", "TB"}[i])
-}
-
-func formatSpeed(kbit int64) string {
-	if kbit < 1000 {
-		return fmt.Sprintf("%d kbit/s", kbit)
-	}
-	return strconv.FormatFloat(float64(kbit)/1000, 'f', -1, 64) + " Mbit/s"
 }
 
 func peerWriteError(err error) error {

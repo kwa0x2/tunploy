@@ -15,6 +15,7 @@ import (
 
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
@@ -145,7 +146,7 @@ func (s *Server) provision(ctx context.Context, in *wg.Instance, progress deploy
 		s.failedCreate(ctx, in, err)
 		return err
 	}
-	s.record(ctx, instanceEvent("server.created", in))
+	s.events.Record(ctx, event.ForInstance("server.created", in))
 	return nil
 }
 
@@ -291,9 +292,9 @@ func (s *Server) defaultInstance(ctx context.Context, existing []wg.Instance, no
 
 func (s *Server) failedCreate(ctx context.Context, in *wg.Instance, err error) {
 	s.rollbackInstance(context.WithoutCancel(ctx), in.ID)
-	e := instanceEvent("server.deploy_failed", in)
+	e := event.ForInstance("server.deploy_failed", in)
 	e.Detail = err.Error()
-	s.record(ctx, e)
+	s.events.Record(ctx, e)
 }
 
 func (s *Server) rollbackInstance(ctx context.Context, id int64) {
@@ -344,7 +345,7 @@ func (s *Server) updateInstance(ctx context.Context, current *wg.Instance, req i
 
 	// Port and MTU are fixed at container creation; the resolver follows its
 	// file, like peers.
-	s.record(ctx, instanceEvent("server.updated", updated))
+	s.events.Record(ctx, event.ForInstance("server.updated", updated))
 	switch {
 	case updated.ListenPort != current.ListenPort || updated.MTU != current.MTU:
 		if err := s.deploy.Redeploy(ctx, updated.ID); err != nil {
@@ -378,7 +379,7 @@ func (s *Server) deleteInstance(ctx context.Context, in *wg.Instance) error {
 	if err := s.store.DeleteInstance(ctx, in.ID); err != nil {
 		return err
 	}
-	s.record(ctx, instanceEvent("server.deleted", in))
+	s.events.Record(ctx, event.ForInstance("server.deleted", in))
 	return nil
 }
 
@@ -391,7 +392,7 @@ func (s *Server) handleInstanceAction(kind string, action func(*deploy.Manager, 
 		if err := action(s.deploy, r.Context(), in.ID); err != nil {
 			return deployError(err)
 		}
-		s.record(r.Context(), instanceEvent(kind, in))
+		s.events.Record(r.Context(), event.ForInstance(kind, in))
 		return s.writeInstance(w, r, http.StatusOK, in)
 	}
 }

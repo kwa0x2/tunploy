@@ -19,6 +19,7 @@ import (
 	"rsc.io/qr"
 
 	"github.com/kwa0x2/tunploy/internal/deploy"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/node"
 	"github.com/kwa0x2/tunploy/internal/store"
@@ -32,8 +33,6 @@ const (
 	defaultPageSize = 50
 	maxPageSize     = 200
 )
-
-var apiEventFamilies = []string{"device", "server", "node"}
 
 type apiEndpoint struct {
 	pattern string
@@ -874,26 +873,11 @@ func (s *Server) apiListNodes(w http.ResponseWriter, r *http.Request) error {
 	return httpx.JSON(w, http.StatusOK, page[apiNodeView]{Data: out})
 }
 
-type apiEvent struct {
-	ID         int64     `json:"id"`
-	Kind       string    `json:"kind"`
-	CreatedAt  time.Time `json:"created_at"`
-	ServerID   int64     `json:"server_id,omitempty"`
-	ServerName string    `json:"server_name,omitempty"`
-	DeviceID   int64     `json:"device_id,omitempty"`
-	DeviceName string    `json:"device_name,omitempty"`
-	NodeName   string    `json:"node_name,omitempty"`
-	IP         string    `json:"ip,omitempty"`
-	Country    string    `json:"country,omitempty"`
-	Detail     string    `json:"detail,omitempty"`
-	Actor      string    `json:"actor,omitempty"`
-}
-
 // Oldest first from after, so a poller keeps the last ID it saw and asks
 // again. Sign-ins and settings stay out: a key reaches devices, not the panel.
 func (s *Server) apiListEvents(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	f := store.EventFilter{Families: apiEventFamilies, Ascending: true}
+	f := store.EventFilter{Families: event.PublicFamilies, Ascending: true}
 	var err error
 	if f.After, err = queryID(q.Get("after"), "after"); err != nil {
 		return err
@@ -920,20 +904,11 @@ func (s *Server) apiListEvents(w http.ResponseWriter, r *http.Request) error {
 	if more {
 		events = events[:limit]
 	}
-	out := make([]apiEvent, len(events))
+	out := make([]event.Public, len(events))
 	for i, e := range events {
-		out[i] = newAPIEvent(e)
+		out[i] = event.ToPublic(e)
 	}
-	return httpx.JSON(w, http.StatusOK, page[apiEvent]{Data: out, HasMore: more})
-}
-
-// Webhooks send the same shape, so a receiver can use either.
-func newAPIEvent(e store.Event) apiEvent {
-	return apiEvent{
-		ID: e.ID, Kind: e.Kind, CreatedAt: e.CreatedAt.UTC().Truncate(time.Second),
-		ServerID: e.InstanceID, ServerName: e.InstanceName, DeviceID: e.PeerID, DeviceName: e.PeerName,
-		NodeName: e.NodeName, IP: e.IP, Country: e.Country, Detail: e.Detail, Actor: e.Actor,
-	}
+	return httpx.JSON(w, http.StatusOK, page[event.Public]{Data: out, HasMore: more})
 }
 
 func queryID(raw, name string) (int64, error) {

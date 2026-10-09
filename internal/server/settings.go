@@ -102,7 +102,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) er
 	if err := s.store.SaveSettings(r.Context(), values); err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "settings.updated"})
+	s.events.Record(r.Context(), store.Event{Kind: "settings.updated"})
 	return s.handleGetSettings(w, r)
 }
 

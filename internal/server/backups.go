@@ -72,17 +72,6 @@ type restoreResult struct {
 	Warnings []string `json:"warnings"`
 }
 
-// RunBackups loads the saved bucket and makes scheduled backups until ctx ends.
-func (s *Server) RunBackups(ctx context.Context) {
-	stored, err := s.store.Settings(ctx)
-	if err != nil {
-		slog.Error("load backup settings", "error", err)
-	} else {
-		s.backups.Load(stored)
-	}
-	s.backups.Run(ctx)
-}
-
 func (s *Server) handleGetBackupSettings(w http.ResponseWriter, r *http.Request) error {
 	v := backupSettings{
 		Schedule:  backup.ScheduleOff,
@@ -126,7 +115,7 @@ func (s *Server) handleSetBackupSettings(w http.ResponseWriter, r *http.Request)
 	if err := s.saveBackupSettings(r.Context(), cfg); err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "settings.backups_changed", IP: clientIP(r), Detail: "bucket " + cfg.S3.Bucket})
+	s.events.Record(r.Context(), store.Event{Kind: "settings.backups_changed", IP: clientIP(r), Detail: "bucket " + cfg.S3.Bucket})
 	return s.handleGetBackupSettings(w, r)
 }
 
@@ -134,7 +123,7 @@ func (s *Server) handleDeleteBackupSettings(w http.ResponseWriter, r *http.Reque
 	if err := s.saveBackupSettings(r.Context(), nil); err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "settings.backups_changed", IP: clientIP(r), Detail: "disconnected"})
+	s.events.Record(r.Context(), store.Event{Kind: "settings.backups_changed", IP: clientIP(r), Detail: "disconnected"})
 	return s.handleGetBackupSettings(w, r)
 }
 
@@ -176,7 +165,7 @@ func (s *Server) handleSetBackupEncryption(w http.ResponseWriter, r *http.Reques
 	if req.Passphrase != "" {
 		detail = "encryption on"
 	}
-	s.record(r.Context(), store.Event{Kind: "settings.backups_changed", IP: clientIP(r), Detail: detail})
+	s.events.Record(r.Context(), store.Event{Kind: "settings.backups_changed", IP: clientIP(r), Detail: detail})
 	return s.handleGetBackupSettings(w, r)
 }
 
@@ -333,7 +322,7 @@ func (s *Server) handleExportBackup(w http.ResponseWriter, r *http.Request) erro
 	}
 	defer body.Close()
 
-	s.record(r.Context(), store.Event{Kind: "backup.downloaded", IP: clientIP(r), Detail: f.Name})
+	s.events.Record(r.Context(), store.Event{Kind: "backup.downloaded", IP: clientIP(r), Detail: f.Name})
 	serveArchive(w, f.Name, f.Size, body)
 	return nil
 }
@@ -349,7 +338,7 @@ func (s *Server) handleDownloadBackup(w http.ResponseWriter, r *http.Request) er
 	}
 	defer body.Close()
 
-	s.record(r.Context(), store.Event{Kind: "backup.downloaded", IP: clientIP(r), Detail: name})
+	s.events.Record(r.Context(), store.Event{Kind: "backup.downloaded", IP: clientIP(r), Detail: name})
 	serveArchive(w, name, size, body)
 	return nil
 }
@@ -373,7 +362,7 @@ func (s *Server) handleDeleteBackup(w http.ResponseWriter, r *http.Request) erro
 	if err := remote.Delete(r.Context(), remote.Key(name)); err != nil {
 		return s3Failure(err)
 	}
-	s.record(r.Context(), store.Event{Kind: "backup.deleted", IP: clientIP(r), Detail: name})
+	s.events.Record(r.Context(), store.Event{Kind: "backup.deleted", IP: clientIP(r), Detail: name})
 	return httpx.NoContent(w)
 }
 
@@ -490,7 +479,7 @@ func (s *Server) restore(ctx context.Context, src io.Reader, name, passphrase, i
 	if err != nil {
 		return res, err
 	}
-	s.notifier.Configure(notifyConfig(stored))
+	s.notifier.Load(stored)
 	s.applyDomain(s.closing, stored)
 
 	// The backup brings its own nodes and SSH key; each node is rebuilt once
@@ -507,7 +496,7 @@ func (s *Server) restore(ctx context.Context, src io.Reader, name, passphrase, i
 		res.Warnings = append(res.Warnings, "some VPN servers could not start: "+err.Error())
 	}
 
-	s.record(ctx, store.Event{Kind: "backup.restored", IP: ip,
+	s.events.Record(ctx, store.Event{Kind: "backup.restored", IP: ip,
 		Detail: name + " (made " + m.CreatedAt.Local().Format("2006-01-02 15:04") + ")"})
 	return res, nil
 }

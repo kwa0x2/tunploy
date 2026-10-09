@@ -3,6 +3,8 @@ package deploy
 import (
 	"context"
 	"testing"
+
+	"github.com/kwa0x2/tunploy/internal/store"
 )
 
 func TestWatchReportsServerHealth(t *testing.T) {
@@ -12,8 +14,6 @@ func TestWatchReportsServerHealth(t *testing.T) {
 	if err := f.m.Deploy(ctx, in.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	var got []ServerHealth
-	f.m.OnServerHealth(func(h ServerHealth) { got = append(got, h) })
 
 	set := func(state string, code int) {
 		t.Helper()
@@ -26,24 +26,26 @@ func TestWatchReportsServerHealth(t *testing.T) {
 	set("running", 0) // first look is never a change
 	set("exited", 0)  // stopped from the panel
 	set("running", 0)
-	if len(got) != 0 {
-		t.Fatalf("clean stops and starts are not outages: %+v", got)
+	health := func() []store.Event { return f.eventsOf("server.down", "server.recovered") }
+	if len(health()) != 0 {
+		t.Fatalf("clean stops and starts are not outages: %+v", health())
 	}
 	set("restarting", 0)
 	set("restarting", 0)
 	set("running", 0)
 	set("exited", 137)
-	want := []ServerHealth{
-		{InstanceID: in.ID, Down: true, Reason: "the container keeps exiting; check its logs"},
-		{InstanceID: in.ID, Down: false},
-		{InstanceID: in.ID, Down: true, Reason: "exited with code 137"},
+	want := []struct{ kind, detail string }{
+		{"server.down", "the container keeps exiting; check its logs"},
+		{"server.recovered", ""},
+		{"server.down", "exited with code 137"},
 	}
+	got := health()
 	if len(got) != len(want) {
-		t.Fatalf("health = %+v", got)
+		t.Fatalf("events = %+v", got)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("health[%d] = %+v, want %+v", i, got[i], want[i])
+	for i, w := range want {
+		if e := got[i]; e.Kind != w.kind || e.Detail != w.detail || e.InstanceName != "Home" {
+			t.Errorf("event %d = %+v, want %s %q", i, e, w.kind, w.detail)
 		}
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kwa0x2/tunploy/internal/event"
 )
 
 type openAPIDoc struct {
@@ -54,8 +56,8 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 		t.Errorf("openapi.json documents %s, which has no route", key)
 	}
 
-	if !slices.Equal(doc.Components.Schemas.EventKind.Enum, webhookKinds) {
-		t.Errorf("EventKind enum %v differs from webhookKinds %v", doc.Components.Schemas.EventKind.Enum, webhookKinds)
+	if !slices.Equal(doc.Components.Schemas.EventKind.Enum, event.PublicKinds) {
+		t.Errorf("EventKind enum %v differs from event.PublicKinds %v", doc.Components.Schemas.EventKind.Enum, event.PublicKinds)
 	}
 }
 

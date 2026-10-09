@@ -65,7 +65,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	}
 	failed := func(detail string) {
 		s.loginThrottle.Fail(key)
-		s.record(r.Context(), store.Event{Kind: "auth.login_failed", IP: clientIP(r), Detail: detail})
+		s.events.Record(r.Context(), store.Event{Kind: "auth.login_failed", IP: clientIP(r), Detail: detail})
 	}
 	badPassword := httpx.Unauthorized("email or password is incorrect")
 
@@ -107,7 +107,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	if err := s.startSession(w, r, user); err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "auth.login", IP: clientIP(r)})
+	s.events.Record(r.Context(), store.Event{Kind: "auth.login", IP: clientIP(r)})
 	return httpx.JSON(w, http.StatusOK, newUserResponse(user))
 }
 
@@ -206,7 +206,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 	if err := s.restartSessions(w, r, user); err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "auth.password_changed", IP: clientIP(r)})
+	s.events.Record(r.Context(), store.Event{Kind: "auth.password_changed", IP: clientIP(r)})
 	return httpx.NoContent(w)
 }
 

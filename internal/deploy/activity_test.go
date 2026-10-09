@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -74,5 +75,32 @@ func TestActivityReportsChanges(t *testing.T) {
 	got = step(2*time.Minute, 300)
 	if len(got) != 1 || got[0].Online || !got[0].OnlineSince.Equal(start.Add(10*time.Second)) {
 		t.Fatalf("want a disconnect with when it came online, got %+v", got)
+	}
+}
+
+func TestActivityIsRecorded(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	in := f.instance(t, "Home", 51820)
+	peer, err := f.store.CreatePeer(ctx, wg.NewPeer(in.ID, "phone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.Local)
+	f.m.now = func() time.Time { return now }
+
+	f.m.reportActivity(in, []PeerChange{
+		{Key: peer.PublicKey, Online: true, Endpoint: "[::ffff:203.0.113.7]:4000"},
+		{Key: peer.PublicKey, OnlineSince: now.Add(-90 * time.Minute)},
+		{Key: wg.GeneratePrivateKey().PublicKey(), Online: true},
+	})
+	if len(f.events) != 2 {
+		t.Fatalf("an unknown key should be skipped: %+v", f.events)
+	}
+	if e := f.events[0]; e.Kind != "device.connected" || e.PeerName != "phone" || e.InstanceName != "Home" || e.IP != "203.0.113.7" {
+		t.Errorf("connected = %+v", e)
+	}
+	if e := f.events[1]; e.Kind != "device.disconnected" || e.Detail != "online for 1h 30m" {
+		t.Errorf("disconnected = %+v", e)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
@@ -22,7 +23,7 @@ func newTestService(t *testing.T) (*Service, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return NewService(st, dir, "v9.9.9"), st
+	return NewService(st, dir, "v9.9.9", event.Discard), st
 }
 
 func TestArchiveRoundTrip(t *testing.T) {
@@ -123,7 +124,7 @@ func TestScheduledUploadPrunesAndReportsFailuresOnce(t *testing.T) {
 	ctx := context.Background()
 
 	var events []store.Event
-	svc.OnEvent(func(_ context.Context, e store.Event) { events = append(events, e) })
+	svc.events = event.Func(func(_ context.Context, e store.Event) { events = append(events, e) })
 
 	clock := time.Date(2026, 9, 24, 4, 0, 0, 0, time.Local)
 	svc.now = func() time.Time { return clock }

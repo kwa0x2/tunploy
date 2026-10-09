@@ -74,7 +74,7 @@ func (s *Server) handleTOTPEnable(w http.ResponseWriter, r *http.Request) error 
 	if err := s.restartSessions(w, r, user); err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "auth.totp_enabled", IP: clientIP(r)})
+	s.events.Record(r.Context(), store.Event{Kind: "auth.totp_enabled", IP: clientIP(r)})
 	return httpx.JSON(w, http.StatusOK, newUserResponse(user))
 }
 
@@ -105,6 +105,6 @@ func (s *Server) handleTOTPDisable(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	user.TOTPSecret, user.TOTPLastStep = "", 0
-	s.record(r.Context(), store.Event{Kind: "auth.totp_disabled", IP: clientIP(r)})
+	s.events.Record(r.Context(), store.Event{Kind: "auth.totp_disabled", IP: clientIP(r)})
 	return httpx.JSON(w, http.StatusOK, newUserResponse(user))
 }

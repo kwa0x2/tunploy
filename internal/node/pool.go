@@ -12,6 +12,7 @@ import (
 
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
@@ -40,18 +41,11 @@ type Status struct {
 	Daemon *docker.Daemon `json:"daemon,omitempty"`
 }
 
-// Change is a node going offline after it was online, or coming back.
-type Change struct {
-	Node   store.Node
-	Online bool
-	Error  string
-}
-
 // Pool keeps one SSH connection per node and reconnects on its own.
 type Pool struct {
 	store     *store.Store
+	events    event.Recorder
 	onConnect func(ctx context.Context, nodeID int64)
-	onChange  func(Change)
 
 	mu     sync.Mutex
 	ctx    context.Context
@@ -59,16 +53,13 @@ type Pool struct {
 	conns  map[int64]*conn
 }
 
-func NewPool(st *store.Store) *Pool {
-	return &Pool{store: st, conns: map[int64]*conn{}}
+func NewPool(st *store.Store, events event.Recorder) *Pool {
+	return &Pool{store: st, events: events, conns: map[int64]*conn{}}
 }
 
 // OnConnect runs after every successful connection, in its own goroutine,
 // so the node can be brought in line with the database. Set it before Start.
 func (p *Pool) OnConnect(fn func(ctx context.Context, nodeID int64)) { p.onConnect = fn }
-
-// OnChange must be set before Start.
-func (p *Pool) OnChange(fn func(Change)) { p.onChange = fn }
 
 // Start connects to every node and keeps at it until ctx ends.
 func (p *Pool) Start(ctx context.Context) error {
@@ -361,7 +352,7 @@ func (c *conn) setOnline(h *Host, daemon docker.Daemon) {
 	c.touch(context.Background(), n.ID)
 	if back {
 		slog.Info("node is back online", "node", n.ID)
-		c.report(Change{Node: n, Online: true})
+		c.pool.events.Record(context.Background(), store.Event{Kind: "node.online", NodeName: n.Name})
 	}
 }
 
@@ -382,13 +373,8 @@ func (c *conn) setOffline(err error) {
 	if was != StateOffline {
 		slog.Warn("node is offline", "node", n.ID, "error", err)
 	}
+	// Only a node that was up is reported down, so a retry loop logs one event.
 	if was == StateOnline {
-		c.report(Change{Node: n, Online: false, Error: err.Error()})
-	}
-}
-
-func (c *conn) report(ch Change) {
-	if c.pool.onChange != nil {
-		c.pool.onChange(ch)
+		c.pool.events.Record(context.Background(), store.Event{Kind: "node.offline", NodeName: n.Name, Detail: err.Error()})
 	}
 }

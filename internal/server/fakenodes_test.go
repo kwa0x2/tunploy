@@ -11,19 +11,14 @@ import (
 
 // fakeNodes stands in for the SSH pool: a node is online while it has a host.
 type fakeNodes struct {
-	mu        sync.Mutex
-	hosts     map[int64]deploy.Host
-	added     []store.Node
-	removed   []int64
-	reloads   int
-	onConnect func(context.Context, int64)
-	onChange  func(node.Change)
+	mu      sync.Mutex
+	hosts   map[int64]deploy.Host
+	added   []store.Node
+	removed []int64
+	reloads int
 }
 
 func newFakeNodes() *fakeNodes { return &fakeNodes{hosts: map[int64]deploy.Host{}} }
-
-func (f *fakeNodes) OnConnect(fn func(context.Context, int64)) { f.onConnect = fn }
-func (f *fakeNodes) OnChange(fn func(node.Change))             { f.onChange = fn }
 
 func (f *fakeNodes) Add(n store.Node) {
 	f.mu.Lock()

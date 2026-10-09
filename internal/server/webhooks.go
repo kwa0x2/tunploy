@@ -1,12 +1,10 @@
 package server
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -16,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
@@ -28,16 +27,6 @@ const (
 	webhookSecretPre   = "whsec_"
 	pingKind           = "ping"
 )
-
-// Every kind a webhook can subscribe to: what /api/v1/events shows.
-var webhookKinds = []string{
-	"device.created", "device.deleted", "device.renamed", "device.moved", "device.enabled", "device.disabled",
-	"device.limits_changed", "device.limit_reached", "device.expired", "device.unblocked", "device.usage_reset",
-	"device.shared", "device.unshared", "device.connected", "device.disconnected",
-	"server.created", "server.deploy_failed", "server.updated", "server.deleted", "server.started",
-	"server.stopped", "server.restarted", "server.down", "server.recovered",
-	"node.added", "node.renamed", "node.deleted", "node.offline", "node.online",
-}
 
 type webhookRequest struct {
 	URL         *string   `json:"url"`
@@ -97,17 +86,17 @@ func checkWebhookURL(raw string) string {
 	return ""
 }
 
-// Kinds keep the order of webhookKinds, so saved lists compare equal.
+// Kinds keep the order of event.PublicKinds, so saved lists compare equal.
 func normalizeEvents(in []string) ([]string, string) {
 	if slices.Contains(in, store.AllEvents) {
 		return []string{store.AllEvents}, ""
 	}
 	for _, k := range in {
-		if !slices.Contains(webhookKinds, k) {
+		if !slices.Contains(event.PublicKinds, k) {
 			return nil, "unknown event " + strconv.Quote(k)
 		}
 	}
-	out := slices.DeleteFunc(slices.Clone(webhookKinds), func(k string) bool { return !slices.Contains(in, k) })
+	out := slices.DeleteFunc(slices.Clone(event.PublicKinds), func(k string) bool { return !slices.Contains(in, k) })
 	if len(out) == 0 {
 		return nil, `choose at least one event, or "*" for all of them`
 	}
@@ -158,12 +147,12 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) err
 	}
 
 	hook.Secret = newWebhookSecret()
-	hook.CreatedBy = actorFrom(r.Context())
+	hook.CreatedBy = event.ActorFrom(r.Context())
 	created, err := s.store.CreateWebhook(r.Context(), hook)
 	if err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "webhook.created", IP: clientIP(r), Detail: webhookDetail(created)})
+	s.events.Record(r.Context(), store.Event{Kind: "webhook.created", IP: clientIP(r), Detail: webhookDetail(created)})
 	return httpx.JSON(w, http.StatusCreated, createdWebhook{Webhook: *created, Secret: created.Secret})
 }
 
@@ -197,7 +186,7 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) err
 		if !updated.Enabled {
 			detail += ", turned off"
 		}
-		s.record(r.Context(), store.Event{Kind: "webhook.updated", IP: clientIP(r), Detail: detail})
+		s.events.Record(r.Context(), store.Event{Kind: "webhook.updated", IP: clientIP(r), Detail: detail})
 	}
 	return httpx.JSON(w, http.StatusOK, updated)
 }
@@ -210,7 +199,7 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) err
 	if err := s.store.DeleteWebhook(r.Context(), hook.ID); err != nil {
 		return err
 	}
-	s.record(r.Context(), store.Event{Kind: "webhook.deleted", IP: clientIP(r), Detail: webhookDetail(hook)})
+	s.events.Record(r.Context(), store.Event{Kind: "webhook.deleted", IP: clientIP(r), Detail: webhookDetail(hook)})
 	return httpx.NoContent(w)
 }
 
@@ -224,8 +213,8 @@ func (s *Server) handlePingWebhook(w http.ResponseWriter, r *http.Request) error
 		return httpx.Conflict("the webhook is turned off")
 	}
 	now := time.Now()
-	payload, err := json.Marshal(apiEvent{Kind: pingKind, CreatedAt: now.UTC().Truncate(time.Second),
-		Detail: "a test delivery from the Tunploy panel", Actor: actorFrom(r.Context())})
+	payload, err := json.Marshal(event.Public{Kind: pingKind, CreatedAt: now.UTC().Truncate(time.Second),
+		Detail: "a test delivery from the Tunploy panel", Actor: event.ActorFrom(r.Context())})
 	if err != nil {
 		return err
 	}
@@ -311,18 +300,4 @@ func webhookDetail(w *store.Webhook) string {
 		events = strings.Join(w.Events, ", ")
 	}
 	return host + " (" + events + ")"
-}
-
-// queueWebhooks sends what /api/v1/events would show to the webhooks that want it.
-func (s *Server) queueWebhooks(ctx context.Context, e store.Event) {
-	family, _, _ := strings.Cut(e.Kind, ".")
-	if !slices.Contains(apiEventFamilies, family) {
-		return
-	}
-	payload, err := json.Marshal(newAPIEvent(e))
-	if err != nil {
-		slog.Error("encode webhook payload", "kind", e.Kind, "error", err)
-		return
-	}
-	s.webhooks.Queue(ctx, e.Kind, e.ID, payload)
 }

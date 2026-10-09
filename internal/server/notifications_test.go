@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/notify/notifytest"
 )
 
@@ -109,18 +108,4 @@ func TestNotificationTestEmail(t *testing.T) {
 
 	delete(body, "to")
 	p.wantError(p.do("POST", "/api/settings/notifications/test", body), http.StatusUnprocessableEntity, "validation_failed")
-}
-
-func TestServerHealthIsRecorded(t *testing.T) {
-	p := newPanel(t)
-	in := p.createInstance(map[string]any{"name": "Home"})
-
-	p.s.serverHealth(deploy.ServerHealth{InstanceID: in.ID, Down: true, Reason: "exited with code 1"})
-	p.s.serverHealth(deploy.ServerHealth{InstanceID: in.ID})
-
-	var events []eventJSON
-	p.want(p.do("GET", "/api/events?category=change", nil), http.StatusOK, &events)
-	if events[0].Kind != "server.recovered" || events[1].Kind != "server.down" || events[1].Detail != "exited with code 1" {
-		t.Fatalf("events = %+v", events)
-	}
 }

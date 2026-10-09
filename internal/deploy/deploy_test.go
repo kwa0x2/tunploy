@@ -11,6 +11,7 @@ import (
 
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/docker/dockertest"
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
@@ -19,6 +20,7 @@ type fixture struct {
 	store  *store.Store
 	docker *dockertest.Fake
 	m      *Manager
+	events []store.Event
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -29,12 +31,23 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	fk := dockertest.New()
-	m, err := New(st, fk, t.TempDir(), DefaultContainerPrefix)
+	f := &fixture{store: st, docker: dockertest.New()}
+	record := event.Func(func(_ context.Context, e store.Event) { f.events = append(f.events, e) })
+	f.m, err = New(st, f.docker, t.TempDir(), DefaultContainerPrefix, record)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{store: st, docker: fk, m: m}
+	return f
+}
+
+func (f *fixture) eventsOf(kinds ...string) []store.Event {
+	var out []store.Event
+	for _, e := range f.events {
+		if slices.Contains(kinds, e.Kind) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func (f *fixture) instance(t *testing.T, name string, port int) *wg.Instance {

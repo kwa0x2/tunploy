@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
@@ -108,11 +109,11 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request, in *wg.Inst
 	if err != nil {
 		return err
 	}
-	e := peerEvent("device.shared", in, shared)
+	e := event.ForPeer("device.shared", in, shared)
 	if req.ExpiresAt != nil {
-		e.Detail = "until " + expiryText(*req.ExpiresAt)
+		e.Detail = "until " + event.Expiry(*req.ExpiresAt)
 	}
-	s.record(r.Context(), e)
+	s.events.Record(r.Context(), e)
 	return s.writeShare(w, r, http.StatusCreated, shared)
 }
 
@@ -124,7 +125,7 @@ func (s *Server) removeShare(ctx context.Context, in *wg.Instance, p *wg.Peer) e
 	if _, err := s.store.SetPeerShare(ctx, p.ID, "", nil); err != nil {
 		return err
 	}
-	s.record(ctx, peerEvent("device.unshared", in, p))
+	s.events.Record(ctx, event.ForPeer("device.unshared", in, p))
 	return nil
 }
 
