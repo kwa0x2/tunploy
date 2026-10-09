@@ -1,5 +1,5 @@
 import { Smartphone } from "lucide-react"
-import type { InstanceState, NodeState, Peer, PeerBlock } from "@/lib/api"
+import type { InstanceState, NodeState, Peer, PeerBlock } from "@/api"
 import { countryFlag, countryName, formatBytes, monthTotal, periodTotal } from "@/lib/format"
 import { cn } from "@/lib/utils"
 

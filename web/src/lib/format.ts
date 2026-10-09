@@ -1,5 +1,5 @@
-import { ApiError } from "@/lib/api"
-import type { Instance, Peer } from "@/lib/api"
+import { ApiError } from "@/api"
+import type { Instance, Peer } from "@/api"
 
 const units = ["B", "KB", "MB", "GB", "TB"]
 

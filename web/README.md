@@ -1,32 +1,22 @@
-# React + TypeScript + Vite
+# Tunploy panel UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React, TypeScript and Vite, with shadcn/ui on Base UI. `npm run build` writes
+into `../internal/web/dist`, which the Go binary embeds.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```
+src/
+  app/          routes, the signed-in shell, 404
+  features/     one folder per screen: auth, overview, servers, peers,
+                nodes, activity, settings, share
+  api/          the HTTP API, one module per resource, like the Go packages
+  components/   shared pieces; ui/ is shadcn
+  hooks/        shared hooks
+  lib/          formatting, theme, cn
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Imports go one way: `app` → `features` → `components`, `hooks`, `lib`, `api`.
+A feature may use another's exported pieces, such as `useAuth`, but shared
+code never imports a feature.
+
+`npm run dev` serves the UI and proxies `/api` to a panel on port 3000
+(`make dev` runs both).

@@ -1,6 +1,6 @@
 import { Check, Circle, Loader2, X } from "lucide-react"
-import { ApiError, DeployError } from "@/lib/api"
-import type { ProvisionStep } from "@/lib/api"
+import { ApiError, DeployError } from "@/api"
+import type { ProvisionStep } from "@/api"
 import { cn } from "@/lib/utils"
 
 function stepsFor(port?: number): { step: ProvisionStep; label: string }[] {
