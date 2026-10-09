@@ -14,7 +14,9 @@ import (
 	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/geoip"
 	"github.com/kwa0x2/tunploy/internal/httpx"
+	"github.com/kwa0x2/tunploy/internal/instance"
 	"github.com/kwa0x2/tunploy/internal/notify"
+	"github.com/kwa0x2/tunploy/internal/peer"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/update"
 	"github.com/kwa0x2/tunploy/internal/web"
@@ -31,6 +33,8 @@ type Server struct {
 	store         *store.Store
 	docker        Docker
 	deploy        *deploy.Manager
+	instances     *instance.Service
+	peers         *peer.Service
 	nodes         Nodes
 	geo           *geoip.DB
 	https         HTTPS
@@ -50,17 +54,19 @@ type Server struct {
 
 // Deps are the services the handlers use; main builds each one.
 type Deps struct {
-	Store    *store.Store
-	Docker   Docker
-	Deploy   *deploy.Manager
-	Nodes    Nodes
-	Geo      *geoip.DB
-	HTTPS    HTTPS
-	Notifier *notify.Notifier
-	Webhooks *webhook.Dispatcher
-	Events   event.Recorder
-	Backups  *backup.Service
-	Updates  *update.Service
+	Store     *store.Store
+	Docker    Docker
+	Deploy    *deploy.Manager
+	Instances *instance.Service
+	Peers     *peer.Service
+	Nodes     Nodes
+	Geo       *geoip.DB
+	HTTPS     HTTPS
+	Notifier  *notify.Notifier
+	Webhooks  *webhook.Dispatcher
+	Events    event.Recorder
+	Backups   *backup.Service
+	Updates   *update.Service
 }
 
 func New(cfg config.Config, d Deps) *Server {
@@ -69,6 +75,8 @@ func New(cfg config.Config, d Deps) *Server {
 		store:         d.Store,
 		docker:        d.Docker,
 		deploy:        d.Deploy,
+		instances:     d.Instances,
+		peers:         d.Peers,
 		nodes:         d.Nodes,
 		geo:           d.Geo,
 		https:         d.HTTPS,
@@ -159,9 +167,9 @@ func (s *Server) routes() http.Handler {
 	private.Handle("GET /api/instances/{id}", httpx.Handler(s.handleGetInstance))
 	private.Handle("PATCH /api/instances/{id}", httpx.Handler(s.handleUpdateInstance))
 	private.Handle("DELETE /api/instances/{id}", httpx.Handler(s.handleDeleteInstance))
-	private.Handle("POST /api/instances/{id}/start", s.handleInstanceAction("server.started", (*deploy.Manager).Start))
-	private.Handle("POST /api/instances/{id}/stop", s.handleInstanceAction("server.stopped", (*deploy.Manager).Stop))
-	private.Handle("POST /api/instances/{id}/restart", s.handleInstanceAction("server.restarted", (*deploy.Manager).Restart))
+	private.Handle("POST /api/instances/{id}/start", s.handleInstanceAction(s.instances.Start))
+	private.Handle("POST /api/instances/{id}/stop", s.handleInstanceAction(s.instances.Stop))
+	private.Handle("POST /api/instances/{id}/restart", s.handleInstanceAction(s.instances.Restart))
 	private.Handle("GET /api/instances/{id}/logs", httpx.Handler(s.handleInstanceLogs))
 
 	private.Handle("GET /api/instances/{id}/peers", httpx.Handler(s.handleListPeers))

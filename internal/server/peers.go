@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
@@ -110,12 +109,12 @@ func (s *Server) peerViews(ctx context.Context, instanceID int64, peers []wg.Pee
 	return views, nil
 }
 
-func (s *Server) peerView(ctx context.Context, p *wg.Peer) (peerView, error) {
-	views, err := s.peerViews(ctx, p.InstanceID, []wg.Peer{*p})
+func (s *Server) writePeer(w http.ResponseWriter, r *http.Request, status int, p *wg.Peer) error {
+	views, err := s.peerViews(r.Context(), p.InstanceID, []wg.Peer{*p})
 	if err != nil {
-		return peerView{}, err
+		return err
 	}
-	return views[0], nil
+	return httpx.JSON(w, status, views[0])
 }
 
 func (s *Server) handlePeerUsage(w http.ResponseWriter, r *http.Request) error {
@@ -135,15 +134,11 @@ func (s *Server) handleResetPeerUsage(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	reset, err := s.resetPeerUsage(r.Context(), in, p)
+	reset, err := s.peers.ResetUsage(r.Context(), in, p)
 	if err != nil {
 		return err
 	}
-	view, err := s.peerView(r.Context(), reset)
-	if err != nil {
-		return err
-	}
-	return httpx.JSON(w, http.StatusOK, view)
+	return s.writePeer(w, r, http.StatusOK, reset)
 }
 
 func (s *Server) handleMovePeer(w http.ResponseWriter, r *http.Request) error {
@@ -167,18 +162,11 @@ func (s *Server) handleMovePeer(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	moved, err := s.movePeer(r.Context(), from, to, p)
-	if errors.Is(err, wg.ErrSubnetFull) {
-		return httpx.Errorf(http.StatusConflict, "subnet_full", "no free addresses left in %s", to.Subnet())
-	}
+	moved, err := s.peers.Move(r.Context(), from, to, p)
 	if err != nil {
 		return err
 	}
-	view, err := s.peerView(r.Context(), moved)
-	if err != nil {
-		return err
-	}
-	return httpx.JSON(w, http.StatusOK, view)
+	return s.writePeer(w, r, http.StatusOK, moved)
 }
 
 func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) error {
@@ -193,18 +181,11 @@ func (s *Server) handleCreatePeer(w http.ResponseWriter, r *http.Request) error 
 
 	p := wg.NewPeer(in.ID, "")
 	req.apply(&p)
-	created, err := s.createPeer(r.Context(), in, p)
-	if errors.Is(err, wg.ErrSubnetFull) {
-		return httpx.Errorf(http.StatusConflict, "subnet_full", "no free addresses left in %s", in.Subnet())
-	}
+	created, err := s.peers.Create(r.Context(), in, p)
 	if err != nil {
 		return err
 	}
-	view, err := s.peerView(r.Context(), created)
-	if err != nil {
-		return err
-	}
-	return httpx.JSON(w, http.StatusCreated, view)
+	return s.writePeer(w, r, http.StatusCreated, created)
 }
 
 func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error {
@@ -219,15 +200,11 @@ func (s *Server) handleUpdatePeer(w http.ResponseWriter, r *http.Request) error 
 
 	next := *p
 	req.apply(&next)
-	updated, err := s.updatePeer(r.Context(), in, *p, next)
+	updated, err := s.peers.Update(r.Context(), in, *p, next)
 	if err != nil {
 		return err
 	}
-	view, err := s.peerView(r.Context(), updated)
-	if err != nil {
-		return err
-	}
-	return httpx.JSON(w, http.StatusOK, view)
+	return s.writePeer(w, r, http.StatusOK, updated)
 }
 
 func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) error {
@@ -235,140 +212,10 @@ func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	if err := s.deletePeer(r.Context(), in, p); err != nil {
+	if err := s.peers.Delete(r.Context(), in, p); err != nil {
 		return err
 	}
 	return httpx.NoContent(w)
-}
-
-// The panel and /api/v1 share these helpers, so both record the same events.
-// A failed apply still returns the saved peer along with the error.
-func (s *Server) createPeer(ctx context.Context, in *wg.Instance, p wg.Peer) (*wg.Peer, error) {
-	if fields := p.Validate(); len(fields) > 0 {
-		return nil, httpx.Invalid(fields)
-	}
-	created, err := s.store.CreatePeer(ctx, p)
-	if err != nil {
-		if errors.Is(err, wg.ErrSubnetFull) {
-			return nil, err
-		}
-		return nil, peerWriteError(err)
-	}
-	e := event.ForPeer("device.created", in, created)
-	if event.HasLimits(created) {
-		e.Detail = event.Limits(created)
-	}
-	s.events.Record(ctx, e)
-	if err := s.deploy.Apply(ctx, in.ID); err != nil {
-		return created, applyError(err)
-	}
-	return created, nil
-}
-
-func (s *Server) updatePeer(ctx context.Context, in *wg.Instance, before, p wg.Peer) (*wg.Peer, error) {
-	updated, err := s.savePeer(ctx, in, before, p)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.deploy.Apply(ctx, updated.InstanceID); err != nil {
-		return updated, applyError(err)
-	}
-	return updated, nil
-}
-
-// savePeer is updatePeer without touching the tunnel, for changes to many peers.
-func (s *Server) savePeer(ctx context.Context, in *wg.Instance, before, p wg.Peer) (*wg.Peer, error) {
-	if fields := p.Validate(); len(fields) > 0 {
-		return nil, httpx.Invalid(fields)
-	}
-	updated, err := s.store.UpdatePeer(ctx, p)
-	if err != nil {
-		return nil, peerWriteError(err)
-	}
-	if updated.Name != before.Name {
-		e := event.ForPeer("device.renamed", in, updated)
-		e.Detail = "was " + before.Name
-		s.events.Record(ctx, e)
-	}
-	if updated.Enabled != before.Enabled {
-		kind := "device.disabled"
-		if updated.Enabled {
-			kind = "device.enabled"
-		}
-		s.events.Record(ctx, event.ForPeer(kind, in, updated))
-	}
-	if event.Limits(updated) != event.Limits(&before) {
-		e := event.ForPeer("device.limits_changed", in, updated)
-		e.Detail = event.Limits(updated)
-		s.events.Record(ctx, e)
-	}
-	return updated, nil
-}
-
-// A device blocked by its limit comes back at once.
-func (s *Server) resetPeerUsage(ctx context.Context, in *wg.Instance, p *wg.Peer) (*wg.Peer, error) {
-	reset, err := s.saveUsageReset(ctx, in, p)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.deploy.Apply(ctx, in.ID); err != nil {
-		return reset, applyError(err)
-	}
-	return reset, nil
-}
-
-func (s *Server) saveUsageReset(ctx context.Context, in *wg.Instance, p *wg.Peer) (*wg.Peer, error) {
-	used, err := s.store.PeersLimitUsage(ctx, []int64{p.ID}, time.Now())
-	if err != nil {
-		return nil, err
-	}
-	reset, err := s.store.ResetPeerUsage(ctx, p.ID, time.Now())
-	if err != nil {
-		return nil, err
-	}
-	e := event.ForPeer("device.usage_reset", in, reset)
-	e.Detail = fmt.Sprintf("%s used %s", event.Bytes(used[p.ID].Total()), event.Period(*p, time.Now()))
-	s.events.Record(ctx, e)
-	return reset, nil
-}
-
-// Both tunnels change: the old one lets the peer go, the new one takes it.
-func (s *Server) movePeer(ctx context.Context, from, to *wg.Instance, p *wg.Peer) (*wg.Peer, error) {
-	moved, err := s.store.MovePeer(ctx, p.ID, to.ID)
-	var dup *store.DuplicateError
-	switch {
-	case errors.Is(err, wg.ErrSubnetFull):
-		return nil, err
-	case errors.As(err, &dup) && dup.Column == "name":
-		return nil, httpx.Invalid(map[string]string{"name": fmt.Sprintf("%q already has a device named %q; rename one first", to.Name, p.Name)})
-	case err != nil:
-		return nil, err
-	}
-	e := event.ForPeer("device.moved", to, moved)
-	e.Detail = "from " + from.Name
-	s.events.Record(ctx, e)
-	if err := errors.Join(s.deploy.Apply(ctx, from.ID), s.deploy.Apply(ctx, to.ID)); err != nil {
-		return moved, applyError(err)
-	}
-	return moved, nil
-}
-
-func (s *Server) deletePeer(ctx context.Context, in *wg.Instance, p *wg.Peer) error {
-	if err := s.removePeer(ctx, in, p); err != nil {
-		return err
-	}
-	if err := s.deploy.Apply(ctx, p.InstanceID); err != nil {
-		return applyError(err)
-	}
-	return nil
-}
-
-func (s *Server) removePeer(ctx context.Context, in *wg.Instance, p *wg.Peer) error {
-	if err := s.store.DeletePeer(ctx, p.ID); err != nil {
-		return err
-	}
-	s.events.Record(ctx, event.ForPeer("device.deleted", in, p))
-	return nil
 }
 
 // Most clients name the tunnel after the file, capped at 15 characters.
@@ -446,25 +293,6 @@ func (req peerRequest) apply(p *wg.Peer) {
 	if req.SpeedLimit != nil {
 		p.SpeedLimit = *req.SpeedLimit
 	}
-}
-
-func peerWriteError(err error) error {
-	var dup *store.DuplicateError
-	if errors.As(err, &dup) {
-		switch dup.Column {
-		case "name":
-			return httpx.Invalid(map[string]string{"name": "a peer with this name already exists"})
-		case "public_key":
-			return httpx.Invalid(map[string]string{"public_key": "another device already uses this public key"})
-		}
-	}
-	return err
-}
-
-// Saved but not live; the next start or restart picks it up.
-func applyError(err error) error {
-	return httpx.Errorf(http.StatusBadGateway, "apply_failed",
-		"saved, but the running tunnel could not be updated (restart it to apply): %v", err)
 }
 
 func tunnelName(name string) string {

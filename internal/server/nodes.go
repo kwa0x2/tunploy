@@ -70,12 +70,12 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) error {
 
 // The panel's own machine is listed first, with ID 0.
 func (s *Server) localNode(ctx context.Context) (nodeView, error) {
-	settings, err := s.settings(ctx)
+	host, err := s.instances.PublicHost(ctx)
 	if err != nil {
 		return nodeView{}, err
 	}
 	v := nodeView{
-		Node:  store.Node{Name: "This server", Host: settings.publicHost(s.cfg.PublicHost)},
+		Node:  store.Node{Name: "This server", Host: host},
 		Local: true,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)

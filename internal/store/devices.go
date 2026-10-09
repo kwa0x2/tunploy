@@ -9,39 +9,11 @@ import (
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
 
-const (
-	DeviceActive       = "active"
-	DeviceDisabled     = "disabled"
-	DeviceExpired      = "expired"
-	DeviceLimitReached = "limit_reached"
-)
-
-func ValidDeviceStatus(s string) bool {
-	switch s {
-	case DeviceActive, DeviceDisabled, DeviceExpired, DeviceLimitReached:
-		return true
-	}
-	return false
-}
-
-// DeviceStatus matches the filter in Devices; used is LimitUsage.
-func DeviceStatus(p wg.Peer, used wg.Traffic, now time.Time) string {
-	if !p.Enabled {
-		return DeviceDisabled
-	}
-	switch p.Blocked(used, now) {
-	case wg.BlockExpired:
-		return DeviceExpired
-	case wg.BlockLimit:
-		return DeviceLimitReached
-	}
-	return DeviceActive
-}
-
 type DeviceFilter struct {
 	InstanceID int64
 	ExternalID string
-	Status     string
+	// Matched by the same rule as wg.Peer.Status.
+	Status wg.Status
 	// Only devices with a larger ID, for paging.
 	After int64
 	Limit int
@@ -63,15 +35,15 @@ func (s *Store) Devices(ctx context.Context, f DeviceFilter, now time.Time) ([]w
 	const live = `enabled = 1 AND (expires_at IS NULL OR expires_at > ?)`
 	month, at := dayKey(MonthStart(now)), now.Unix()
 	switch f.Status {
-	case DeviceDisabled:
+	case wg.StatusDisabled:
 		where = append(where, "enabled = 0")
-	case DeviceExpired:
+	case wg.StatusExpired:
 		where = append(where, "enabled = 1 AND expires_at <= ?")
 		args = append(args, at)
-	case DeviceLimitReached:
+	case wg.StatusLimitReached:
 		where = append(where, live, "data_limit > 0 AND "+limitUsed+" >= data_limit")
 		args = append(args, at, month, month)
-	case DeviceActive:
+	case wg.StatusActive:
 		where = append(where, live, "(data_limit = 0 OR "+limitUsed+" < data_limit)")
 		args = append(args, at, month, month)
 	}

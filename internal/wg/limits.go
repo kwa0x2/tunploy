@@ -48,3 +48,35 @@ func (p Peer) Blocked(used Traffic, now time.Time) Block {
 	}
 	return ""
 }
+
+// Status is a device's state as API clients see it.
+type Status string
+
+const (
+	StatusActive       Status = "active"
+	StatusDisabled     Status = "disabled"
+	StatusExpired      Status = "expired"
+	StatusLimitReached Status = "limit_reached"
+)
+
+func (s Status) Valid() bool {
+	switch s {
+	case StatusActive, StatusDisabled, StatusExpired, StatusLimitReached:
+		return true
+	}
+	return false
+}
+
+// Status must match the status filter in store.Devices.
+func (p Peer) Status(used Traffic, now time.Time) Status {
+	if !p.Enabled {
+		return StatusDisabled
+	}
+	switch p.Blocked(used, now) {
+	case BlockExpired:
+		return StatusExpired
+	case BlockLimit:
+		return StatusLimitReached
+	}
+	return StatusActive
+}

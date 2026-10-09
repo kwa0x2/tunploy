@@ -1,19 +1,15 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
 
+	"github.com/kwa0x2/tunploy/internal/apperr"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
-
-// A group is every device with one external_id: a customer's phone and
-// laptop, changed together when their plan renews or ends.
 
 type apiGroup struct {
 	ExternalID  string `json:"external_id"`
@@ -66,7 +62,6 @@ func (s *Server) apiGetGroup(w http.ResponseWriter, r *http.Request) error {
 	return s.writeGroup(w, r, id, peers)
 }
 
-// Every device is checked before any is saved, so a bad value changes none.
 func (s *Server) apiUpdateGroup(w http.ResponseWriter, r *http.Request) error {
 	id, peers, err := s.groupFromPath(r)
 	if err != nil {
@@ -81,15 +76,11 @@ func (s *Server) apiUpdateGroup(w http.ResponseWriter, r *http.Request) error {
 	next := make([]wg.Peer, len(peers))
 	for i, p := range peers {
 		next[i] = p
-		fields := change.apply(&next[i])
-		if err := validationError(next[i].Validate(), fields); err != nil {
-			return err
+		if fields := change.apply(&next[i]); len(fields) > 0 {
+			return apperr.Fields(next[i].Validate(), fields)
 		}
 	}
-
-	updated, err := s.eachInGroup(r.Context(), peers, func(in *wg.Instance, i int) (*wg.Peer, error) {
-		return s.savePeer(r.Context(), in, peers[i], next[i])
-	})
+	updated, err := s.peers.UpdateGroup(r.Context(), peers, next)
 	if err != nil {
 		return err
 	}
@@ -101,10 +92,7 @@ func (s *Server) apiDeleteGroup(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.eachInGroup(r.Context(), peers, func(in *wg.Instance, i int) (*wg.Peer, error) {
-		return nil, s.removePeer(r.Context(), in, &peers[i])
-	})
-	if err != nil {
+	if err := s.peers.DeleteGroup(r.Context(), peers); err != nil {
 		return err
 	}
 	return httpx.NoContent(w)
@@ -115,50 +103,9 @@ func (s *Server) apiResetGroupUsage(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	reset, err := s.eachInGroup(r.Context(), peers, func(in *wg.Instance, i int) (*wg.Peer, error) {
-		return s.saveUsageReset(r.Context(), in, &peers[i])
-	})
+	reset, err := s.peers.ResetGroupUsage(r.Context(), peers)
 	if err != nil {
 		return err
 	}
 	return s.writeGroup(w, r, id, reset)
-}
-
-// eachInGroup saves a change to every peer, then updates each tunnel it
-// touched once, even when a save failed partway.
-func (s *Server) eachInGroup(ctx context.Context, peers []wg.Peer, save func(in *wg.Instance, i int) (*wg.Peer, error)) ([]wg.Peer, error) {
-	instances := map[int64]*wg.Instance{}
-	var touched []int64
-	out := make([]wg.Peer, 0, len(peers))
-	var saveErr error
-	for i, p := range peers {
-		in, ok := instances[p.InstanceID]
-		if !ok {
-			if in, saveErr = s.store.InstanceByID(ctx, p.InstanceID); saveErr != nil {
-				break
-			}
-			instances[p.InstanceID] = in
-			touched = append(touched, in.ID)
-		}
-		saved, err := save(in, i)
-		if err != nil {
-			saveErr = err
-			break
-		}
-		if saved != nil {
-			out = append(out, *saved)
-		}
-	}
-
-	var applyErrs []error
-	for _, id := range touched {
-		applyErrs = append(applyErrs, s.deploy.Apply(ctx, id))
-	}
-	if saveErr != nil {
-		return nil, saveErr
-	}
-	if err := errors.Join(applyErrs...); err != nil {
-		return nil, applyError(err)
-	}
-	return out, nil
 }

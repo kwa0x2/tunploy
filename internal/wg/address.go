@@ -52,3 +52,7 @@ func addrFrom(n uint32) netip.Addr {
 	binary.BigEndian.PutUint32(b[:], n)
 	return netip.AddrFrom4(b)
 }
+
+// Capacity is how many peers fit in a subnet with this prefix length:
+// every host address but the server's own.
+func Capacity(bits int) int { return 1<<(32-bits) - 3 }

@@ -18,7 +18,9 @@ import (
 	"github.com/kwa0x2/tunploy/internal/docker/dockertest"
 	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/host"
+	"github.com/kwa0x2/tunploy/internal/instance"
 	"github.com/kwa0x2/tunploy/internal/notify"
+	"github.com/kwa0x2/tunploy/internal/peer"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/tlscert"
 	"github.com/kwa0x2/tunploy/internal/update"
@@ -55,16 +57,18 @@ func newTestServerWithDeploy(t *testing.T, dk Docker, fk *dockertest.Fake) (*Ser
 	}
 	cfg := config.Config{SessionTTL: time.Hour, PublicHost: "vpn.example.com"}
 	s := New(cfg, Deps{
-		Store:    st,
-		Docker:   dk,
-		Deploy:   mgr,
-		Nodes:    nodes,
-		HTTPS:    &fakeHTTPS{status: tlscert.Status{Enabled: true, State: tlscert.StateOff}},
-		Notifier: notifier,
-		Webhooks: webhooks,
-		Events:   events,
-		Backups:  backup.NewService(st, t.TempDir(), "test", events),
-		Updates:  update.New("1.0.0", t.TempDir(), &fakeSelf{}, false, events),
+		Store:     st,
+		Docker:    dk,
+		Deploy:    mgr,
+		Instances: instance.New(st, mgr, nil, events, cfg.PublicHost),
+		Peers:     peer.New(st, mgr, events),
+		Nodes:     nodes,
+		HTTPS:     &fakeHTTPS{status: tlscert.Status{Enabled: true, State: tlscert.StateOff}},
+		Notifier:  notifier,
+		Webhooks:  webhooks,
+		Events:    events,
+		Backups:   backup.NewService(st, t.TempDir(), "test", events),
+		Updates:   update.New("1.0.0", t.TempDir(), &fakeSelf{}, false, events),
 	})
 	s.lookupHost = func(ctx context.Context, host string) ([]string, error) {
 		if strings.HasSuffix(host, ".invalid") {

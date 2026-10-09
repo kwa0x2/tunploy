@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+
+	"github.com/kwa0x2/tunploy/internal/apperr"
 )
 
 const maxBodyBytes = 1 << 20
@@ -97,16 +99,42 @@ func Decode(r *http.Request, v any) error {
 	return nil
 }
 
-// Anything but an *Error goes out generic, so internals never leak.
-func WriteError(w http.ResponseWriter, r *http.Request, err error) {
-	var apiErr *Error
-	if !errors.As(err, &apiErr) {
-		slog.Error("request failed",
-			"error", err,
-			"method", r.Method,
-			"path", r.URL.Path,
-		)
-		apiErr = Errorf(http.StatusInternalServerError, "internal_error", "something went wrong")
+// ErrorFor is what the client sees of err. Anything but an *Error or an
+// *apperr.Error is logged and goes out generic, so internals never leak.
+func ErrorFor(r *http.Request, err error) *Error {
+	var httpErr *Error
+	if errors.As(err, &httpErr) {
+		return httpErr
 	}
-	JSON(w, apiErr.Status, map[string]any{"error": apiErr})
+	var appErr *apperr.Error
+	if errors.As(err, &appErr) {
+		return &Error{Status: statusOf(appErr.Kind), Code: appErr.Code, Message: appErr.Message, Fields: appErr.Fields}
+	}
+	slog.Error("request failed",
+		"error", err,
+		"method", r.Method,
+		"path", r.URL.Path,
+	)
+	return Errorf(http.StatusInternalServerError, "internal_error", "something went wrong")
+}
+
+func statusOf(k apperr.Kind) int {
+	switch k {
+	case apperr.Invalid:
+		return http.StatusUnprocessableEntity
+	case apperr.NotFound:
+		return http.StatusNotFound
+	case apperr.Conflict:
+		return http.StatusConflict
+	case apperr.Unavailable:
+		return http.StatusServiceUnavailable
+	case apperr.Upstream:
+		return http.StatusBadGateway
+	}
+	return http.StatusInternalServerError
+}
+
+func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	e := ErrorFor(r, err)
+	JSON(w, e.Status, map[string]any{"error": e})
 }

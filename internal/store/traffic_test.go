@@ -199,7 +199,7 @@ func TestLimitUsage(t *testing.T) {
 		}
 		return byServer
 	}
-	status := func(now time.Time, want string) {
+	status := func(now time.Time, want wg.Status) {
 		t.Helper()
 		devices, err := st.Devices(ctx, DeviceFilter{Status: want, Limit: 10, After: monthly.ID}, now)
 		if err != nil {
@@ -220,7 +220,7 @@ func TestLimitUsage(t *testing.T) {
 	if got[monthly.ID].RxBytes != 100 || got[total.ID].RxBytes != 1100 {
 		t.Fatalf("before reset: %+v", got)
 	}
-	status(now, DeviceLimitReached)
+	status(now, wg.StatusLimitReached)
 
 	// The same day's bytes from before the reset stop counting; later ones do.
 	for _, p := range []wg.Peer{monthly, total} {
@@ -233,7 +233,7 @@ func TestLimitUsage(t *testing.T) {
 	if got[monthly.ID].RxBytes != 40 || got[total.ID].RxBytes != 40 {
 		t.Fatalf("after reset: %+v", got)
 	}
-	status(now, DeviceActive)
+	status(now, wg.StatusActive)
 
 	// A monthly count starts over with the next month either way.
 	october := time.Date(2026, 10, 2, 12, 0, 0, 0, time.Local)

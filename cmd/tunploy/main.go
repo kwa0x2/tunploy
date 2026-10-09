@@ -22,8 +22,10 @@ import (
 	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/geoip"
 	"github.com/kwa0x2/tunploy/internal/host"
+	"github.com/kwa0x2/tunploy/internal/instance"
 	"github.com/kwa0x2/tunploy/internal/node"
 	"github.com/kwa0x2/tunploy/internal/notify"
+	"github.com/kwa0x2/tunploy/internal/peer"
 	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/tlscert"
@@ -130,17 +132,19 @@ func run() error {
 		return err
 	}
 	handler := server.New(cfg, server.Deps{
-		Store:    st,
-		Docker:   dk,
-		Deploy:   mgr,
-		Nodes:    nodes,
-		Geo:      geo,
-		HTTPS:    certs,
-		Notifier: notifier,
-		Webhooks: webhooks,
-		Events:   events,
-		Backups:  backups,
-		Updates:  updates,
+		Store:     st,
+		Docker:    dk,
+		Deploy:    mgr,
+		Instances: instance.New(st, mgr, geo, events, cfg.PublicHost),
+		Peers:     peer.New(st, mgr, events),
+		Nodes:     nodes,
+		Geo:       geo,
+		HTTPS:     certs,
+		Notifier:  notifier,
+		Webhooks:  webhooks,
+		Events:    events,
+		Backups:   backups,
+		Updates:   updates,
 	})
 	updates.ReportLast(ctx)
 

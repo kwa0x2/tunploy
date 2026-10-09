@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 )
 
@@ -37,12 +36,9 @@ func (s *Server) handleInstanceLogs(w http.ResponseWriter, r *http.Request) erro
 	// Shutdown waits for open requests; a followed stream would hold it.
 	defer context.AfterFunc(s.closing, cancel)()
 
-	logs, err := s.deploy.Logs(ctx, in.ID, tail, follow)
-	if errors.Is(err, deploy.ErrNotDeployed) {
-		return httpx.Conflict("this server has no container yet; deploy it first")
-	}
+	logs, err := s.instances.Logs(ctx, in, tail, follow)
 	if err != nil {
-		return deployError(err)
+		return err
 	}
 	defer logs.Close()
 

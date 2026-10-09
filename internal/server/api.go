@@ -18,9 +18,10 @@ import (
 
 	"rsc.io/qr"
 
-	"github.com/kwa0x2/tunploy/internal/deploy"
+	"github.com/kwa0x2/tunploy/internal/apperr"
 	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/httpx"
+	"github.com/kwa0x2/tunploy/internal/instance"
 	"github.com/kwa0x2/tunploy/internal/node"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
@@ -132,9 +133,9 @@ type apiDevice struct {
 	Address    netip.Addr      `json:"address"`
 	PublicKey  wg.Key          `json:"public_key"`
 	// The client made the key pair; the panel never saw the private key.
-	ClientKey bool   `json:"client_key"`
-	Enabled   bool   `json:"enabled"`
-	Status    string `json:"status"`
+	ClientKey bool      `json:"client_key"`
+	Enabled   bool      `json:"enabled"`
+	Status    wg.Status `json:"status"`
 	// As of the watcher's last look, at most ten seconds old.
 	Online        bool       `json:"online"`
 	LastHandshake *time.Time `json:"last_handshake"`
@@ -245,7 +246,7 @@ func (s *Server) apiDevices(ctx context.Context, peers []wg.Peer) ([]apiDevice, 
 			PublicKey:     p.PublicKey,
 			ClientKey:     p.KeyOnClient(),
 			Enabled:       p.Enabled,
-			Status:        store.DeviceStatus(p, used[p.ID], now),
+			Status:        p.Status(used[p.ID], now),
 			Online:        online[p.InstanceID][p.PublicKey],
 			LastHandshake: p.LastHandshake,
 			DataLimit:     p.DataLimit,
@@ -272,7 +273,7 @@ func (s *Server) apiDevice(ctx context.Context, p *wg.Peer) (apiDevice, error) {
 
 func (s *Server) apiListDevices(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	f := store.DeviceFilter{ExternalID: q.Get("external_id"), Status: q.Get("status")}
+	f := store.DeviceFilter{ExternalID: q.Get("external_id"), Status: wg.Status(q.Get("status"))}
 	var err error
 	if f.InstanceID, err = queryID(q.Get("server_id"), "server_id"); err != nil {
 		return err
@@ -283,7 +284,7 @@ func (s *Server) apiListDevices(w http.ResponseWriter, r *http.Request) error {
 	if f.Limit, err = pageSize(q.Get("limit")); err != nil {
 		return err
 	}
-	if f.Status != "" && !store.ValidDeviceStatus(f.Status) {
+	if f.Status != "" && !f.Status.Valid() {
 		return httpx.BadRequest("status must be active, disabled, expired or limit_reached")
 	}
 
@@ -339,10 +340,10 @@ func (s *Server) apiCreateDevice(w http.ResponseWriter, r *http.Request) error {
 		p.Name = generatedName(p.ExternalID)
 	}
 	if len(fields) > 0 {
-		return validationError(p.Validate(), fields)
+		return apperr.Fields(p.Validate(), fields)
 	}
 
-	created, err := s.createPeer(r.Context(), in, p)
+	created, err := s.peers.Create(r.Context(), in, p)
 	if errors.Is(err, wg.ErrSubnetFull) {
 		return httpx.Errorf(http.StatusConflict, "server_full", "server %q has no free addresses left", in.Name)
 	}
@@ -403,56 +404,12 @@ func (s *Server) targetServer(ctx context.Context, pl placement, skip int64) (*w
 
 	var country, city string
 	if pl.Country != nil {
-		country = strings.TrimSpace(*pl.Country)
+		country = *pl.Country
 	}
 	if pl.City != nil {
-		city = strings.TrimSpace(*pl.City)
+		city = *pl.City
 	}
-	in, err := s.emptiestServer(ctx, country, city, skip)
-	if err != nil {
-		return nil, err
-	}
-	if in == nil {
-		where := ""
-		switch {
-		case city != "":
-			where = " in " + city
-		case country != "":
-			where = " in " + strings.ToUpper(country)
-		}
-		return nil, httpx.Errorf(http.StatusConflict, "no_server_available", "no running server%s has free addresses", where)
-	}
-	return in, nil
-}
-
-// emptiestServer is the running server with the fewest devices that still
-// has room; nil when there is none.
-func (s *Server) emptiestServer(ctx context.Context, country, city string, skip int64) (*wg.Instance, error) {
-	instances, err := s.store.Instances(ctx)
-	if err != nil {
-		return nil, err
-	}
-	instances = slices.DeleteFunc(instances, func(in wg.Instance) bool {
-		return in.ID == skip || (country != "" && !strings.EqualFold(in.Country, country)) ||
-			(city != "" && !strings.EqualFold(in.City, city))
-	})
-	counts, err := s.store.PeerCounts(ctx)
-	if err != nil {
-		return nil, err
-	}
-	statuses := s.deploy.Statuses(ctx, instances)
-
-	var best *wg.Instance
-	for i, in := range instances {
-		n := counts[in.ID]
-		if statuses[in.ID].State != deploy.StateRunning || n >= capacity(in.Subnet()) {
-			continue
-		}
-		if best == nil || n < counts[best.ID] {
-			best = &instances[i]
-		}
-	}
-	return best, nil
+	return s.instances.Pick(ctx, country, city, skip)
 }
 
 // Names are unique per server, but API callers rarely care about them.
@@ -490,9 +447,9 @@ func (s *Server) apiUpdateDevice(w http.ResponseWriter, r *http.Request) error {
 		fields["public_key"] = "public_key cannot be changed; delete the device and create a new one"
 	}
 	if len(fields) > 0 {
-		return validationError(next.Validate(), fields)
+		return apperr.Fields(next.Validate(), fields)
 	}
-	updated, err := s.updatePeer(r.Context(), in, *p, next)
+	updated, err := s.peers.Update(r.Context(), in, *p, next)
 	if err != nil {
 		return err
 	}
@@ -508,7 +465,7 @@ func (s *Server) apiDeleteDevice(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := s.deletePeer(r.Context(), in, p); err != nil {
+	if err := s.peers.Delete(r.Context(), in, p); err != nil {
 		return err
 	}
 	return httpx.NoContent(w)
@@ -591,7 +548,7 @@ func (s *Server) apiResetDeviceUsage(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return err
 	}
-	reset, err := s.resetPeerUsage(r.Context(), in, p)
+	reset, err := s.peers.ResetUsage(r.Context(), in, p)
 	if err != nil {
 		return err
 	}
@@ -626,7 +583,7 @@ func (s *Server) apiMoveDevice(w http.ResponseWriter, r *http.Request) error {
 	if to.ID == from.ID {
 		return httpx.Invalid(map[string]string{"server_id": "the device is already on this server"})
 	}
-	moved, err := s.movePeer(r.Context(), from, to, p)
+	moved, err := s.peers.Move(r.Context(), from, to, p)
 	if errors.Is(err, wg.ErrSubnetFull) {
 		return httpx.Errorf(http.StatusConflict, "server_full", "server %q has no free addresses left", to.Name)
 	}
@@ -724,17 +681,12 @@ func (s *Server) apiServers(ctx context.Context, instances []wg.Instance) ([]api
 			PersistentKeepalive: in.PersistentKeepalive,
 			ClientAllowedIPs:    in.ClientAllowedIPs,
 			DeviceCount:         counts[in.ID],
-			Capacity:            capacity(in.Subnet()),
+			Capacity:            wg.Capacity(in.Address.Bits()),
 			CreatedAt:           in.CreatedAt,
 		}
 	}
 	return out, nil
 }
-
-func capacity(subnet netip.Prefix) int { return subnetCapacity(subnet.Bits()) }
-
-// Every host address but the server's own.
-func subnetCapacity(bits int) int { return 1<<(32-bits) - 3 }
 
 // Few enough to list whole; country narrows them to one location.
 func (s *Server) apiListServers(w http.ResponseWriter, r *http.Request) error {
@@ -783,16 +735,16 @@ func (s *Server) writeAPIServer(w http.ResponseWriter, r *http.Request, status i
 // Deploys before it answers, like the panel's one click: a 201 is a running
 // server, and a failed deploy leaves nothing behind.
 func (s *Server) apiCreateServer(w http.ResponseWriter, r *http.Request) error {
-	var req instanceRequest
+	var req instance.Change
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-	created, err := s.saveNewInstance(r.Context(), req)
+	created, err := s.instances.Create(r.Context(), req)
 	if err != nil {
 		return err
 	}
-	if err := s.provision(r.Context(), created, nil); err != nil {
-		return deployError(err)
+	if err := s.instances.Provision(r.Context(), created, nil); err != nil {
+		return err
 	}
 	return s.writeAPIServer(w, r, http.StatusCreated, created)
 }
@@ -802,11 +754,11 @@ func (s *Server) apiUpdateServer(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	var req instanceRequest
+	var req instance.Change
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-	updated, err := s.updateInstance(r.Context(), current, req)
+	updated, err := s.instances.Update(r.Context(), current, req)
 	if err != nil {
 		return err
 	}
@@ -838,7 +790,7 @@ func (s *Server) apiDeleteServer(w http.ResponseWriter, r *http.Request) error {
 				"server %q has %d %s; move them away first, or send ?force=true to delete them with it", in.Name, n, devices)
 		}
 	}
-	if err := s.deleteInstance(r.Context(), in); err != nil {
+	if err := s.instances.Delete(r.Context(), in); err != nil {
 		return err
 	}
 	return httpx.NoContent(w)
