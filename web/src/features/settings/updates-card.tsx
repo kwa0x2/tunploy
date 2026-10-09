@@ -12,9 +12,9 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useUpdate } from "@/features/settings/update-context"
 import { useNow } from "@/hooks/use-now"
 import { errorMessage, formatRelative } from "@/lib/format"
-import { useUpdate } from "@/features/settings/update-context"
 
 export function UpdatesCard() {
   const { status, error, check, startUpdate } = useUpdate()

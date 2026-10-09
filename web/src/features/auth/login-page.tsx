@@ -4,8 +4,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { AuthLayout } from "@/features/auth/auth-layout"
 import { LoginForm } from "@/features/auth/login-form"
-import { api } from "@/api"
 import { useAuth } from "@/features/auth/auth-context"
+import { api } from "@/api"
 
 export function LoginPage() {
   const { login } = useAuth()

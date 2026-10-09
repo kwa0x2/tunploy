@@ -12,9 +12,9 @@ import {
 } from "@/components/ui/table"
 import { PageHeader } from "@/components/page-header"
 import { DeviceIcon, GeoAttribution, Location, MonthUsage, PeerStatus } from "@/components/status"
+import { loadFleet } from "@/features/peers/fleet"
 import { useNow } from "@/hooks/use-now"
 import { useResource } from "@/hooks/use-resource"
-import { loadFleet } from "@/features/peers/fleet"
 import { endpointHost, errorMessage, formatRelative, isOnline, lastSeen } from "@/lib/format"
 
 export function PeersPage() {

@@ -16,9 +16,9 @@ import { Input } from "@/components/ui/input"
 import { FormField } from "@/components/form-field"
 import { PageHeader } from "@/components/page-header"
 import { SecurityCard } from "@/features/settings/security-card"
+import { useAuth } from "@/features/auth/auth-context"
 import { useResource } from "@/hooks/use-resource"
 import { ApiError, api } from "@/api"
-import { useAuth } from "@/features/auth/auth-context"
 import { errorMessage } from "@/lib/format"
 
 export function SecuritySettingsPage() {

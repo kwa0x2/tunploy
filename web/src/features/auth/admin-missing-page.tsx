@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CopyButton } from "@/components/copy-button"
 import { AuthLayout } from "@/features/auth/auth-layout"
-import { api } from "@/api"
 import { useAuth } from "@/features/auth/auth-context"
+import { api } from "@/api"
 import { execCommand } from "@/lib/format"
 
 export function AdminMissingPage() {
