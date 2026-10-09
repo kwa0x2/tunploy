@@ -93,6 +93,20 @@ func TestGetCertificateGuards(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesTheSavedDomain(t *testing.T) {
+	m := New(t.TempDir(), "http://127.0.0.1:1/directory", ":443")
+	m.Load(Settings("panel.example.com", "me@example.com"))
+	if st := m.Status(); st.Domain != "panel.example.com" || st.Email != "me@example.com" {
+		t.Fatalf("loaded %+v", st)
+	}
+
+	m.Disable("could not listen on :443")
+	m.Load(Settings("other.example.com", ""))
+	if st := m.Status(); st.Domain != "panel.example.com" {
+		t.Fatalf("a disabled manager took a domain: %+v", st)
+	}
+}
+
 func TestObtainIsRateLimited(t *testing.T) {
 	m := New(t.TempDir(), "http://127.0.0.1:1/directory", ":443")
 	m.Configure("panel.example.com", "")

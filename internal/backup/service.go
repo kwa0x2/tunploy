@@ -159,6 +159,7 @@ type Service struct {
 	version string
 	now     func() time.Time
 	events  event.Recorder
+	live    Live
 
 	// Held for the whole of a backup or restore; never waited on.
 	busy sync.Mutex
@@ -171,15 +172,11 @@ type Service struct {
 	retryAt    time.Time
 }
 
-func NewService(st *store.Store, dataDir, version string, events event.Recorder) *Service {
+func NewService(st *store.Store, dataDir, version string, events event.Recorder, live Live) *Service {
 	tmp := filepath.Join(dataDir, "tmp")
 	os.RemoveAll(tmp)
-	return &Service{store: st, dataDir: dataDir, tmpDir: tmp, version: version, events: events, now: time.Now}
+	return &Service{store: st, dataDir: dataDir, tmpDir: tmp, version: version, events: events, live: live, now: time.Now}
 }
-
-func (s *Service) DataDir() string { return s.dataDir }
-
-func (s *Service) TempDir() string { return s.tmpDir }
 
 // Load applies the saved settings, including when the last backup ran.
 func (s *Service) Load(stored map[string]string) {

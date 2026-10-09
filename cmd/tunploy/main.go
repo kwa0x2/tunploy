@@ -15,6 +15,7 @@ import (
 	"time"
 	_ "time/tzdata" // TZ works even in an image without a zoneinfo directory
 
+	"github.com/kwa0x2/tunploy/internal/api"
 	"github.com/kwa0x2/tunploy/internal/backup"
 	"github.com/kwa0x2/tunploy/internal/config"
 	"github.com/kwa0x2/tunploy/internal/deploy"
@@ -26,7 +27,6 @@ import (
 	"github.com/kwa0x2/tunploy/internal/node"
 	"github.com/kwa0x2/tunploy/internal/notify"
 	"github.com/kwa0x2/tunploy/internal/peer"
-	"github.com/kwa0x2/tunploy/internal/server"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/tlscert"
 	"github.com/kwa0x2/tunploy/internal/update"
@@ -124,20 +124,25 @@ func run() error {
 	if cfg.HTTPSListen == "" {
 		certs.Disable("HTTPS is turned off with TUNPLOY_HTTPS=false")
 	}
-	backups := backup.NewService(st, cfg.DataDir, version, events)
 	updates := update.New(version, cfg.DataDir, dk, cfg.UpdateCheck, events)
 	nodes := node.NewPool(st, events)
 	mgr, err := deploy.New(st, host.NewLocal(dk, cfg.DataDir), nodes, cfg.ContainerPrefix, events)
 	if err != nil {
 		return err
 	}
-	handler := server.New(cfg, server.Deps{
+	backups := backup.NewService(st, cfg.DataDir, version, events, backup.Live{
+		Settings: []backup.Loader{notifier, certs},
+		VPN:      mgr,
+		Nodes:    nodes,
+	})
+	handler := api.New(cfg, api.Deps{
 		Store:     st,
 		Docker:    dk,
 		Deploy:    mgr,
 		Instances: instance.New(st, mgr, geo, events, cfg.PublicHost),
 		Peers:     peer.New(st, mgr, events),
-		Nodes:     nodes,
+		Nodes:     node.NewService(st, nodes, mgr, dk, events),
+		Pool:      nodes,
 		Geo:       geo,
 		HTTPS:     certs,
 		Notifier:  notifier,
@@ -148,8 +153,9 @@ func run() error {
 	})
 	updates.ReportLast(ctx)
 
-	if stored, err := st.Settings(ctx); err != nil {
-		slog.Error("load email and backup settings", "error", err)
+	stored, err := st.Settings(ctx)
+	if err != nil {
+		slog.Error("load settings", "error", err)
 	} else {
 		notifier.Load(stored)
 		backups.Load(stored)
@@ -190,9 +196,8 @@ func run() error {
 
 	if cfg.HTTPSListen != "" {
 		servers = append(servers, serveHTTPS(cfg, handler, certs)...)
-		if err := handler.RestoreDomain(ctx); err != nil {
-			slog.Error("restore panel domain", "error", err)
-		}
+		// Once the listeners are up, since Let's Encrypt checks the domain through them.
+		certs.Load(stored)
 	}
 
 	select {

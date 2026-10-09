@@ -23,7 +23,7 @@ func newTestService(t *testing.T) (*Service, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return NewService(st, dir, "v9.9.9", event.Discard), st
+	return NewService(st, dir, "v9.9.9", event.Discard, Live{}), st
 }
 
 func TestArchiveRoundTrip(t *testing.T) {
