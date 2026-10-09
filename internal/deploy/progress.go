@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kwa0x2/tunploy/internal/host"
 )
 
 // The manager reports the first two steps, image/tunploy-wg.sh the rest.
@@ -45,7 +47,7 @@ type BootError struct {
 
 func (e *BootError) Error() string { return e.Reason }
 
-func (m *Manager) waitReady(ctx context.Context, h Host, name string, progress Progress) error {
+func (m *Manager) waitReady(ctx context.Context, h host.Host, name string, progress Progress) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, bootTimeout, errBootTimeout)
 	defer cancel()
 

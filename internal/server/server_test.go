@@ -17,6 +17,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker/dockertest"
 	"github.com/kwa0x2/tunploy/internal/event"
+	"github.com/kwa0x2/tunploy/internal/host"
 	"github.com/kwa0x2/tunploy/internal/notify"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/tlscert"
@@ -47,12 +48,11 @@ func newTestServerWithDeploy(t *testing.T, dk Docker, fk *dockertest.Fake) (*Ser
 	notifier := notify.New()
 	webhooks := webhook.New(st)
 	events := event.NewJournal(st, nil, notifier, webhooks)
-	mgr, err := deploy.New(st, fk, t.TempDir(), deploy.DefaultContainerPrefix, events)
+	nodes := newFakeNodes()
+	mgr, err := deploy.New(st, host.NewLocal(fk, t.TempDir()), nodes, deploy.DefaultContainerPrefix, events)
 	if err != nil {
 		t.Fatalf("new deploy manager: %v", err)
 	}
-	nodes := newFakeNodes()
-	mgr.SetRemote(nodes.Host)
 	cfg := config.Config{SessionTTL: time.Hour, PublicHost: "vpn.example.com"}
 	s := New(cfg, Deps{
 		Store:    st,

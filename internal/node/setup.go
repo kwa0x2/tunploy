@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
+	"github.com/kwa0x2/tunploy/internal/host"
 )
 
 type Step string
@@ -54,7 +54,7 @@ type Setup struct {
 	// LocalDaemon is the panel's own Docker daemon ID; a node sharing it would
 	// fight the panel over the same containers.
 	LocalDaemon string
-	Prepare     func(ctx context.Context, h deploy.Host) error
+	Prepare     func(ctx context.Context, h host.Host) error
 	Progress    func(Step)
 }
 
@@ -177,7 +177,7 @@ echo %[2]s >> ~/.ssh/authorized_keys`, quote(keyBlob(line)), quote(line))
 }
 
 // Deauthorize removes the panel's key from a node that is being let go.
-func Deauthorize(ctx context.Context, h deploy.Host, signer ssh.Signer) error {
+func Deauthorize(ctx context.Context, h host.Host, signer ssh.Signer) error {
 	nh, ok := h.(*Host)
 	if !ok {
 		return nil
@@ -192,7 +192,7 @@ cat "$f.tunploy" > "$f" && rm -f "$f.tunploy"`, blob)
 }
 
 // RemoveData deletes the panel's data directory on a node.
-func RemoveData(ctx context.Context, h deploy.Host) error {
+func RemoveData(ctx context.Context, h host.Host) error {
 	nh, ok := h.(*Host)
 	if !ok {
 		return nil

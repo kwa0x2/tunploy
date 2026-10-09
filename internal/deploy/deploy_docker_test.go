@@ -15,6 +15,7 @@ import (
 
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/event"
+	"github.com/kwa0x2/tunploy/internal/host"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
@@ -48,7 +49,7 @@ func newDockerFixture(t *testing.T, ctx context.Context) *dockerFixture {
 	t.Cleanup(func() { st.Close() })
 
 	prefix := fmt.Sprintf("tunploy-test-%08x-", rand.Uint32())
-	m, err := New(st, dk, t.TempDir(), prefix, event.Discard)
+	m, err := New(st, host.NewLocal(dk, t.TempDir()), nil, prefix, event.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

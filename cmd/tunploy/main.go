@@ -21,6 +21,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/event"
 	"github.com/kwa0x2/tunploy/internal/geoip"
+	"github.com/kwa0x2/tunploy/internal/host"
 	"github.com/kwa0x2/tunploy/internal/node"
 	"github.com/kwa0x2/tunploy/internal/notify"
 	"github.com/kwa0x2/tunploy/internal/server"
@@ -117,10 +118,6 @@ func run() error {
 	webhooks := webhook.New(st)
 	events := event.NewJournal(st, geo, notifier, webhooks)
 
-	mgr, err := deploy.New(st, dk, cfg.DataDir, cfg.ContainerPrefix, events)
-	if err != nil {
-		return err
-	}
 	certs := tlscert.New(filepath.Join(cfg.DataDir, "certs"), cfg.ACMEDirectory, cfg.HTTPSListen)
 	if cfg.HTTPSListen == "" {
 		certs.Disable("HTTPS is turned off with TUNPLOY_HTTPS=false")
@@ -128,12 +125,10 @@ func run() error {
 	backups := backup.NewService(st, cfg.DataDir, version, events)
 	updates := update.New(version, cfg.DataDir, dk, cfg.UpdateCheck, events)
 	nodes := node.NewPool(st, events)
-	mgr.SetRemote(nodes.Host)
-	nodes.OnConnect(func(ctx context.Context, nodeID int64) {
-		if err := mgr.NodeUp(ctx, nodeID); err != nil && ctx.Err() == nil {
-			slog.Error("bring node in line", "node", nodeID, "error", err)
-		}
-	})
+	mgr, err := deploy.New(st, host.NewLocal(dk, cfg.DataDir), nodes, cfg.ContainerPrefix, events)
+	if err != nil {
+		return err
+	}
 	handler := server.New(cfg, server.Deps{
 		Store:    st,
 		Docker:   dk,
@@ -166,7 +161,7 @@ func run() error {
 	if logDockerStatus(ctx, dk) {
 		go reconcile(ctx, mgr, cfg.DataDir, rebuild)
 	}
-	if err := nodes.Start(ctx); err != nil {
+	if err := nodes.Start(ctx, mgr); err != nil {
 		slog.Error("connect to nodes", "error", err)
 	}
 	go mgr.Watch(ctx, peerWatchInterval)

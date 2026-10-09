@@ -16,6 +16,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/event"
+	"github.com/kwa0x2/tunploy/internal/host"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
@@ -373,7 +374,7 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) er
 // Container first: a leftover row beats a tunnel the panel forgot. An
 // offline node drops the orphan itself when it reconnects.
 func (s *Server) deleteInstance(ctx context.Context, in *wg.Instance) error {
-	if err := s.deploy.Remove(ctx, in.ID); err != nil && !errors.Is(err, deploy.ErrNodeOffline) {
+	if err := s.deploy.Remove(ctx, in.ID); err != nil && !errors.Is(err, host.ErrOffline) {
 		return deployError(err)
 	}
 	if err := s.store.DeleteInstance(ctx, in.ID); err != nil {
@@ -521,7 +522,7 @@ func deployError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return httpx.NotFound("instance not found")
-	case errors.Is(err, deploy.ErrNodeOffline):
+	case errors.Is(err, host.ErrOffline):
 		return httpx.Errorf(http.StatusServiceUnavailable, "node_offline", "%v", err)
 	case errors.Is(err, docker.ErrUnavailable):
 		return httpx.Errorf(http.StatusServiceUnavailable, "docker_unavailable", "docker is not reachable: %v", err)

@@ -12,6 +12,7 @@ import (
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/docker/dockertest"
 	"github.com/kwa0x2/tunploy/internal/event"
+	"github.com/kwa0x2/tunploy/internal/host"
 	"github.com/kwa0x2/tunploy/internal/store"
 	"github.com/kwa0x2/tunploy/internal/wg"
 )
@@ -33,7 +34,7 @@ func newFixture(t *testing.T) *fixture {
 
 	f := &fixture{store: st, docker: dockertest.New()}
 	record := event.Func(func(_ context.Context, e store.Event) { f.events = append(f.events, e) })
-	f.m, err = New(st, f.docker, t.TempDir(), DefaultContainerPrefix, record)
+	f.m, err = New(st, host.NewLocal(f.docker, t.TempDir()), nil, DefaultContainerPrefix, record)
 	if err != nil {
 		t.Fatal(err)
 	}

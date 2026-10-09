@@ -10,9 +10,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/kwa0x2/tunploy/internal/deploy"
 	"github.com/kwa0x2/tunploy/internal/docker"
 	"github.com/kwa0x2/tunploy/internal/event"
+	"github.com/kwa0x2/tunploy/internal/host"
 	"github.com/kwa0x2/tunploy/internal/store"
 )
 
@@ -43,9 +43,9 @@ type Status struct {
 
 // Pool keeps one SSH connection per node and reconnects on its own.
 type Pool struct {
-	store     *store.Store
-	events    event.Recorder
-	onConnect func(ctx context.Context, nodeID int64)
+	store  *store.Store
+	events event.Recorder
+	syncer Syncer
 
 	mu     sync.Mutex
 	ctx    context.Context
@@ -57,14 +57,17 @@ func NewPool(st *store.Store, events event.Recorder) *Pool {
 	return &Pool{store: st, events: events, conns: map[int64]*conn{}}
 }
 
-// OnConnect runs after every successful connection, in its own goroutine,
-// so the node can be brought in line with the database. Set it before Start.
-func (p *Pool) OnConnect(fn func(ctx context.Context, nodeID int64)) { p.onConnect = fn }
+// Syncer brings a node in line with the database; the deploy manager in production.
+type Syncer interface {
+	NodeUp(ctx context.Context, nodeID int64) error
+}
 
-// Start connects to every node and keeps at it until ctx ends.
-func (p *Pool) Start(ctx context.Context) error {
+// Start connects to every node and keeps at it until ctx ends. Each time a
+// node connects, syncer gets it in line with the database.
+func (p *Pool) Start(ctx context.Context, syncer Syncer) error {
 	p.mu.Lock()
 	p.ctx = ctx
+	p.syncer = syncer
 	p.mu.Unlock()
 	return p.Reload(ctx)
 }
@@ -146,15 +149,15 @@ func (p *Pool) conn(nodeID int64) *conn {
 }
 
 // Host is the deploy manager's way in; it fails fast while a node is down.
-func (p *Pool) Host(nodeID int64) (deploy.Host, error) {
+func (p *Pool) Host(nodeID int64) (host.Host, error) {
 	c := p.conn(nodeID)
 	if c == nil {
-		return nil, deploy.ErrNodeOffline
+		return nil, host.ErrOffline
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.host == nil {
-		return nil, deploy.ErrNodeOffline
+		return nil, host.ErrOffline
 	}
 	return c.host, nil
 }
@@ -269,9 +272,11 @@ func (c *conn) session(ctx context.Context) error {
 		return fmt.Errorf("docker on the node: %w", err)
 	}
 	c.setOnline(h, daemon)
-	if c.pool.onConnect != nil {
-		go c.pool.onConnect(ctx, n.ID)
-	}
+	go func() {
+		if err := c.pool.syncer.NodeUp(ctx, n.ID); err != nil && ctx.Err() == nil {
+			slog.Error("bring node in line", "node", n.ID, "error", err)
+		}
+	}()
 
 	err = keepalive(ctx, client, func() { c.touch(ctx, n.ID) })
 	if ctx.Err() == nil {

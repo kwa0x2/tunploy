@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/kwa0x2/tunploy/internal/deploy"
+	"github.com/kwa0x2/tunploy/internal/host"
 	"github.com/kwa0x2/tunploy/internal/httpx"
 	"github.com/kwa0x2/tunploy/internal/node"
 	"github.com/kwa0x2/tunploy/internal/store"
@@ -24,7 +24,7 @@ type Nodes interface {
 	Remove(nodeID int64)
 	Rename(store.Node)
 	Status(nodeID int64) node.Status
-	Host(nodeID int64) (deploy.Host, error)
+	Host(nodeID int64) (host.Host, error)
 	Reload(ctx context.Context) error
 }
 
@@ -403,7 +403,7 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) error 
 		if err := node.Deauthorize(ctx, h, signer); err != nil {
 			slog.Warn("remove the panel's key from a node", "node", n.ID, "error", err)
 		}
-	case errors.Is(err, deploy.ErrNodeOffline):
+	case errors.Is(err, host.ErrOffline):
 		if r.URL.Query().Get("force") != "true" {
 			return httpx.Errorf(http.StatusConflict, "node_offline",
 				"the node is offline, so its VPN containers cannot be removed; delete it anyway to forget it")

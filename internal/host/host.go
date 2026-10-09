@@ -1,15 +1,32 @@
-package deploy
+// Package host is a machine the VPN containers run on: the panel's own, or a
+// node it reaches over SSH.
+package host
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/kwa0x2/tunploy/internal/docker"
 )
 
-// Host is a machine the containers run on: the panel's own, or a node it
-// reaches over SSH.
+type Docker interface {
+	ImageExists(ctx context.Context, ref string) (bool, error)
+	BuildImage(ctx context.Context, tag string, files map[string][]byte) error
+	CreateContainer(ctx context.Context, spec docker.ContainerSpec) (string, error)
+	InspectContainer(ctx context.Context, id string) (docker.Container, error)
+	ListContainers(ctx context.Context) ([]docker.Container, error)
+	StartContainer(ctx context.Context, id string) error
+	StopContainer(ctx context.Context, id string, timeout time.Duration) error
+	RemoveContainer(ctx context.Context, id string) error
+	Exec(ctx context.Context, id string, cmd []string) ([]byte, error)
+	Logs(ctx context.Context, id string, tail int, follow bool) (io.ReadCloser, error)
+}
+
 type Host interface {
 	Docker
 	// Root is the data directory as that machine's Docker daemon sees it.
@@ -21,18 +38,21 @@ type Host interface {
 	ReadDir(ctx context.Context, path string) ([]string, error)
 }
 
-// ErrNodeOffline means the panel cannot reach the node right now. What the
+// ErrOffline means the panel cannot reach the node right now. What the
 // database says is applied once it is back.
-var ErrNodeOffline = errors.New("node is offline")
+var ErrOffline = errors.New("node is offline")
 
-type localHost struct {
+// Local is the panel's own machine.
+type Local struct {
 	Docker
 	root string
 }
 
-func (h localHost) Root() string { return h.root }
+func NewLocal(dk Docker, root string) Local { return Local{Docker: dk, root: root} }
 
-func (h localHost) WriteFile(_ context.Context, path string, body []byte) error {
+func (h Local) Root() string { return h.root }
+
+func (h Local) WriteFile(_ context.Context, path string, body []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
@@ -56,14 +76,14 @@ func (h localHost) WriteFile(_ context.Context, path string, body []byte) error 
 	return nil
 }
 
-func (h localHost) RemoveAll(_ context.Context, path string) error {
+func (h Local) RemoveAll(_ context.Context, path string) error {
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("remove %s: %w", path, err)
 	}
 	return nil
 }
 
-func (h localHost) ReadDir(_ context.Context, path string) ([]string, error) {
+func (h Local) ReadDir(_ context.Context, path string) ([]string, error) {
 	entries, err := os.ReadDir(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
