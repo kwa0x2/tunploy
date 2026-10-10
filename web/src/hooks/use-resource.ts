@@ -23,6 +23,7 @@ export function useResource<T>(load: () => Promise<T>, pollMs?: number) {
   }, [load])
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- state changes once the request is back, not during the effect
     void reload()
     if (!pollMs) return
     const timer = setInterval(() => {

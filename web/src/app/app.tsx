@@ -1,38 +1,41 @@
+import { Suspense, lazy } from "react"
+import type { ComponentType } from "react"
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
-import { Loader2 } from "lucide-react"
 import { Toaster } from "@/components/ui/sonner"
 import { AppShell } from "@/app/app-shell"
+import { Loading } from "@/app/loading"
 import { NotFoundPage } from "@/app/not-found-page"
-import { ActivityPage } from "@/features/activity/activity-page"
-import { AdminMissingPage } from "@/features/auth/admin-missing-page"
-import { LoginPage } from "@/features/auth/login-page"
-import { NodesPage } from "@/features/nodes/nodes-page"
-import { OverviewPage } from "@/features/overview/overview-page"
-import { PeersPage } from "@/features/peers/peers-page"
-import { ServerDetailPage } from "@/features/servers/server-detail-page"
-import { ServersPage } from "@/features/servers/servers-page"
-import { SharePage } from "@/features/share/share-page"
-import { ApiKeysSettingsPage } from "@/features/settings/api-keys-page"
-import { WebhooksSettingsPage } from "@/features/settings/webhooks-page"
-import { BackupsSettingsPage } from "@/features/settings/backups-page"
-import { DomainSettingsPage } from "@/features/settings/domain-page"
-import { GeneralSettingsPage } from "@/features/settings/general-page"
-import { NotificationsSettingsPage } from "@/features/settings/notifications-page"
-import { SecuritySettingsPage } from "@/features/settings/security-page"
-import { UpdatesSettingsPage } from "@/features/settings/updates-page"
-import { AuthProvider, useAuth } from "@/features/auth/auth-context"
-import { ThemeProvider } from "@/lib/theme"
+import { useAuth } from "@/features/auth/auth-context"
+import { AuthProvider } from "@/features/auth/auth-provider"
+import { ThemeProvider } from "@/lib/theme-provider"
+
+// Each page is its own chunk, so a visit loads the shell and the page it opens.
+function page<M>(load: () => Promise<M>, pick: (m: M) => ComponentType) {
+  return lazy(() => load().then((m) => ({ default: pick(m) })))
+}
+
+const ActivityPage = page(() => import("@/features/activity/activity-page"), (m) => m.ActivityPage)
+const AdminMissingPage = page(() => import("@/features/auth/admin-missing-page"), (m) => m.AdminMissingPage)
+const LoginPage = page(() => import("@/features/auth/login-page"), (m) => m.LoginPage)
+const NodesPage = page(() => import("@/features/nodes/nodes-page"), (m) => m.NodesPage)
+const OverviewPage = page(() => import("@/features/overview/overview-page"), (m) => m.OverviewPage)
+const PeersPage = page(() => import("@/features/peers/peers-page"), (m) => m.PeersPage)
+const ServerDetailPage = page(() => import("@/features/servers/server-detail-page"), (m) => m.ServerDetailPage)
+const ServersPage = page(() => import("@/features/servers/servers-page"), (m) => m.ServersPage)
+const SharePage = page(() => import("@/features/share/share-page"), (m) => m.SharePage)
+const ApiKeysSettingsPage = page(() => import("@/features/settings/api-keys-page"), (m) => m.ApiKeysSettingsPage)
+const WebhooksSettingsPage = page(() => import("@/features/settings/webhooks-page"), (m) => m.WebhooksSettingsPage)
+const BackupsSettingsPage = page(() => import("@/features/settings/backups-page"), (m) => m.BackupsSettingsPage)
+const DomainSettingsPage = page(() => import("@/features/settings/domain-page"), (m) => m.DomainSettingsPage)
+const GeneralSettingsPage = page(() => import("@/features/settings/general-page"), (m) => m.GeneralSettingsPage)
+const NotificationsSettingsPage = page(() => import("@/features/settings/notifications-page"), (m) => m.NotificationsSettingsPage)
+const SecuritySettingsPage = page(() => import("@/features/settings/security-page"), (m) => m.SecuritySettingsPage)
+const UpdatesSettingsPage = page(() => import("@/features/settings/updates-page"), (m) => m.UpdatesSettingsPage)
 
 function Routing() {
   const { status } = useAuth()
 
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-svh items-center justify-center">
-        <Loader2 className="text-muted-foreground size-6 animate-spin" />
-      </div>
-    )
-  }
+  if (status === "loading") return <Loading className="min-h-svh" />
 
   if (status === "setup-required") {
     return (
@@ -80,17 +83,19 @@ export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
-        <Routes>
-          <Route path="/share/:token" element={<SharePage />} />
-          <Route
-            path="*"
-            element={
-              <AuthProvider>
-                <Routing />
-              </AuthProvider>
-            }
-          />
-        </Routes>
+        <Suspense fallback={<Loading className="min-h-svh" />}>
+          <Routes>
+            <Route path="/share/:token" element={<SharePage />} />
+            <Route
+              path="*"
+              element={
+                <AuthProvider>
+                  <Routing />
+                </AuthProvider>
+              }
+            />
+          </Routes>
+        </Suspense>
         <Toaster />
       </BrowserRouter>
     </ThemeProvider>

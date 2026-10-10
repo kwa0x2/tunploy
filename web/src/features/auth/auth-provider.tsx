@@ -1,20 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { ApiError, api } from "@/api"
-import type { Credentials, User } from "@/api"
-
-type Status = "loading" | "setup-required" | "anonymous" | "authenticated"
-
-interface AuthState {
-  status: Status
-  user: User | null
-  recheck: () => Promise<void>
-  login: (creds: Credentials) => Promise<void>
-  logout: () => Promise<void>
-  setUser: (user: User) => void
-}
-
-const AuthContext = createContext<AuthState | null>(null)
+import type { User } from "@/api"
+import { AuthContext } from "@/features/auth/auth-context"
+import type { AuthState, Status } from "@/features/auth/auth-context"
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>("loading")
@@ -42,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- state changes once the request is back, not during the effect
     bootstrap().catch(() => setStatus("anonymous"))
   }, [bootstrap])
 
@@ -65,10 +55,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   return <AuthContext value={value}>{children}</AuthContext>
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error("useAuth must be used inside AuthProvider")
-  return ctx
 }

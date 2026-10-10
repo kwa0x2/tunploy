@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { Suspense, useState } from "react"
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom"
 import {
   ArchiveRestore,
@@ -32,8 +32,10 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { Logo } from "@/components/logo"
 import { SiteFooter } from "@/components/site-footer"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { Loading } from "@/app/loading"
 import { useAuth } from "@/features/auth/auth-context"
-import { UpdateProvider, useUpdate } from "@/features/settings/update-context"
+import { useUpdate } from "@/features/settings/update-context"
+import { UpdateProvider } from "@/features/settings/update-provider"
 import { cn } from "@/lib/utils"
 
 const navigation = [
@@ -213,7 +215,9 @@ function Shell() {
         </header>
 
         <main className="flex-1 px-4 py-6 md:px-6 md:py-8">
-          <Outlet />
+          <Suspense fallback={<Loading className="py-24" />}>
+            <Outlet />
+          </Suspense>
         </main>
         <SiteFooter className="px-4 pb-6 md:px-6" />
       </div>

@@ -1,17 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
-
-type Theme = "light" | "dark" | "system"
+import { ThemeContext } from "@/lib/theme"
+import type { Theme, ThemeState } from "@/lib/theme"
 
 const STORAGE_KEY = "tunploy-theme"
-
-interface ThemeState {
-  theme: Theme
-  resolved: "light" | "dark"
-  setTheme: (theme: Theme) => void
-}
-
-const ThemeContext = createContext<ThemeState | null>(null)
 
 function systemTheme(): "light" | "dark" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
@@ -62,10 +54,4 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   )
 
   return <ThemeContext value={value}>{children}</ThemeContext>
-}
-
-export function useTheme() {
-  const ctx = useContext(ThemeContext)
-  if (!ctx) throw new Error("useTheme must be used inside ThemeProvider")
-  return ctx
 }
